@@ -18,6 +18,7 @@ const DEFAULT_EXCLUDE = [
   "**/out/**"
 ];
 const CLASS_INPUT_TRIGGER_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_".split("");
+const SUPPORTED_STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 const SUPPORTED_DOCUMENTS = [
   { language: "html", scheme: "file" },
   { language: "html", scheme: "untitled" },
@@ -106,11 +107,7 @@ class CssIndex {
 
   async collectFiles() {
     const settings = this.getSettings();
-    const globs = new Set();
-
-    for (const pattern of settings.entryFiles) {
-      globs.add(pattern);
-    }
+    const globs = new Set(await expandConfiguredPatterns(settings.entryFiles));
 
     if (settings.enableAutoIndex) {
       for (const pattern of settings.include.length ? settings.include : DEFAULT_INCLUDE) {
@@ -139,7 +136,7 @@ class CssIndex {
 
     const settings = this.getSettings();
     const watchPatterns = new Set([
-      ...settings.entryFiles,
+      ...expandConfiguredPatternsSync(settings.entryFiles),
       ...(settings.enableAutoIndex ? settings.include : [])
     ]);
 
@@ -356,7 +353,8 @@ function createCompletionItem(className, entries, range) {
   item.insertText = className;
   item.filterText = className;
   item.sortText = className;
-  item.detail = primary ? `${primary.selector} | ${path.basename(primary.filePath)}` : "Local CSS class";
+  item.detail = primary ? createEntrySummary(primary) : "Local CSS class";
+  item.description = primary ? path.basename(primary.filePath) : "Local CSS";
   item.documentation = buildHoverMarkdown(entries, 3, true);
   return item;
 }
@@ -556,6 +554,76 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
+async function expandConfiguredPatterns(patterns) {
+  const expanded = [];
+  for (const pattern of patterns) {
+    const resolved = await resolveConfiguredPattern(pattern);
+    for (const item of resolved) {
+      expanded.push(item);
+    }
+  }
+  return expanded;
+}
+
+function expandConfiguredPatternsSync(patterns) {
+  const expanded = [];
+  for (const pattern of patterns) {
+    for (const item of resolveConfiguredPatternSync(pattern)) {
+      expanded.push(item);
+    }
+  }
+  return expanded;
+}
+
+async function resolveConfiguredPattern(pattern) {
+  if (!pattern) {
+    return [];
+  }
+
+  if (hasGlobSyntax(pattern)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  const ext = path.extname(pattern).toLowerCase();
+  if (SUPPORTED_STYLE_EXTENSIONS.has(ext)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  const candidates = getWorkspaceCandidateUris(pattern);
+  for (const uri of candidates) {
+    try {
+      const stat = await vscode.workspace.fs.stat(uri);
+      if (stat.type & vscode.FileType.Directory) {
+        return [toDirectoryGlob(pattern)];
+      }
+      if (stat.type & vscode.FileType.File) {
+        return [normalizeGlobSlashes(pattern)];
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return [toDirectoryGlob(pattern)];
+}
+
+function resolveConfiguredPatternSync(pattern) {
+  if (!pattern) {
+    return [];
+  }
+
+  if (hasGlobSyntax(pattern)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  const ext = path.extname(pattern).toLowerCase();
+  if (SUPPORTED_STYLE_EXTENSIONS.has(ext)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  return [toDirectoryGlob(pattern)];
+}
+
 function resolveParser(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === ".scss") {
@@ -608,6 +676,41 @@ function createSuggestController() {
       }, 40);
     }
   };
+}
+
+function createEntrySummary(entry) {
+  const oneLine = entry.declarations.replace(/\s+/g, " ").trim();
+  if (!oneLine) {
+    return entry.selector;
+  }
+  if (oneLine.length <= 72) {
+    return oneLine;
+  }
+  return `${oneLine.slice(0, 69)}...`;
+}
+
+function hasGlobSyntax(pattern) {
+  return /[*?[\]{}]/.test(pattern);
+}
+
+function normalizeGlobSlashes(value) {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function toDirectoryGlob(pattern) {
+  const normalized = normalizeGlobSlashes(pattern);
+  return `${normalized}/**/*.{css,scss,less}`;
+}
+
+function getWorkspaceCandidateUris(pattern) {
+  const normalized = pattern.replace(/\//g, path.sep);
+  if (path.isAbsolute(normalized)) {
+    return [vscode.Uri.file(normalized)];
+  }
+
+  return (vscode.workspace.workspaceFolders || []).map((folder) => {
+    return vscode.Uri.joinPath(folder.uri, normalized);
+  });
 }
 
 module.exports = {

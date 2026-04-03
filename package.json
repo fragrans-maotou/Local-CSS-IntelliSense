@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Index workspace CSS classes and provide completion, hover, and definition support for local global styles.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "local-dev",
   "license": "MIT",
   "repository": {
@@ -64,7 +64,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Specific glob patterns to index first, such as src/styles/global.css or styles/**/*.scss."
+          "description": "Files, folders, or glob patterns to index first, such as src/styles/global.css, src/styles, or styles/**/*.scss."
         },
         "localCssIntelliSense.include": {
           "type": "array",

@@ -30,6 +30,7 @@ Example:
 {
   "localCssIntelliSense.entryFiles": [
     "src/styles/global.css",
+    "src/styles",
     "src/styles/**/*.scss"
   ],
   "localCssIntelliSense.exclude": [
@@ -39,6 +40,12 @@ Example:
   ]
 }
 ```
+
+`entryFiles` now accepts three forms:
+
+- a single file, such as `src/styles/global.css`
+- a folder, such as `src/styles`
+- a glob, such as `src/styles/**/*.scss`
 
 ## Development
 

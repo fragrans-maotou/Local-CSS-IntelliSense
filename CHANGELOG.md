@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.4
+
+- show a short CSS declaration summary in completion items
+- allow `entryFiles` to accept folders in addition to files and glob patterns
+
 ## 0.0.3
 
 - trigger class suggestions while typing inside `class`, `className`, and `:class` values
