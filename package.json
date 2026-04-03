@@ -5,6 +5,14 @@
   "version": "0.0.1",
   "publisher": "local-dev",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fragrans-maotou/Local-CSS-IntelliSense.git"
+  },
+  "homepage": "https://github.com/fragrans-maotou/Local-CSS-IntelliSense#readme",
+  "bugs": {
+    "url": "https://github.com/fragrans-maotou/Local-CSS-IntelliSense/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
