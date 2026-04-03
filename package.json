@@ -4,6 +4,7 @@
   "description": "Index local CSS classes for completion, hover, and definition. 为本地全局样式提供类名补全、悬停和定义跳转。",
   "version": "0.0.5",
   "publisher": "local-css-intellisense",
+  "icon": "media/icon.png",
   "license": "MIT",
   "repository": {
     "type": "git",
