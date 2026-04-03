@@ -1,0 +1,111 @@
+{
+  "name": "local-css-intellisense",
+  "displayName": "Local CSS IntelliSense",
+  "description": "Index workspace CSS classes and provide completion, hover, and definition support for local global styles.",
+  "version": "0.0.1",
+  "publisher": "local-dev",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "css",
+    "intellisense",
+    "autocomplete",
+    "hover",
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:localCssIntelliSense.refreshIndex",
+    "workspaceContains:**/*.css",
+    "workspaceContains:**/*.scss",
+    "workspaceContains:**/*.less"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "localCssIntelliSense.refreshIndex",
+        "title": "Local CSS IntelliSense: Refresh Index"
+      }
+    ],
+    "configuration": {
+      "title": "Local CSS IntelliSense",
+      "properties": {
+        "localCssIntelliSense.enableAutoIndex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan the workspace for CSS-like files."
+        },
+        "localCssIntelliSense.entryFiles": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Specific glob patterns to index first, such as src/styles/global.css or styles/**/*.scss."
+        },
+        "localCssIntelliSense.include": {
+          "type": "array",
+          "default": [
+            "**/*.css",
+            "**/*.scss",
+            "**/*.less"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns used when automatic indexing is enabled."
+        },
+        "localCssIntelliSense.exclude": {
+          "type": "array",
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.next/**",
+            "**/coverage/**",
+            "**/.git/**",
+            "**/out/**"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns that should be ignored during indexing."
+        },
+        "localCssIntelliSense.maxFileSizeKB": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "description": "Skip files larger than this size in kilobytes."
+        },
+        "localCssIntelliSense.maxEntriesPerHover": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Maximum number of matching CSS rules shown in hover details."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "npx @vscode/vsce package",
+    "lint": "node -e \"console.log('No linter configured')\"",
+    "test": "node -e \"console.log('No automated tests configured yet')\""
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^2.31.1"
+  },
+  "dependencies": {
+    "postcss": "^8.4.49",
+    "postcss-less": "^6.0.0",
+    "postcss-safe-parser": "^7.0.1",
+    "postcss-scss": "^4.0.9",
+    "postcss-selector-parser": "^7.1.0"
+  }
+}

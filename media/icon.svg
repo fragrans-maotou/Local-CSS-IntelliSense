@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Local CSS IntelliSense icon">
+  <rect width="128" height="128" rx="28" fill="#0f172a"/>
+  <rect x="18" y="18" width="92" height="92" rx="18" fill="#e2e8f0"/>
+  <path d="M38 40h52l-4 38-22 10-22-10 2-14h12l-1 7 9 4 9-4 1-8H46l-2-23h44l-1 10H50l1 5h34l1-15H39z" fill="#0284c7"/>
+  <circle cx="98" cy="94" r="14" fill="#22c55e"/>
+  <path d="M92 94l4 4 8-10" fill="none" stroke="#052e16" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+</svg>
