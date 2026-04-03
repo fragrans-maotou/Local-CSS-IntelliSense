@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Index workspace CSS classes and provide completion, hover, and definition support for local global styles.",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "local-dev",
   "license": "MIT",
   "repository": {
@@ -28,13 +28,21 @@
     "workspace"
   ],
   "activationEvents": [
-    "onStartupFinished",
     "onCommand:localCssIntelliSense.refreshIndex",
+    "onLanguage:html",
+    "onLanguage:vue",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescriptreact",
+    "onLanguage:svelte",
+    "onLanguage:astro",
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:php",
     "workspaceContains:**/*.css",
     "workspaceContains:**/*.scss",
     "workspaceContains:**/*.less"
   ],
-  "main": "./src/extension.js",
+  "main": "./src/extension.runtime.js",
   "contributes": {
     "commands": [
       {
