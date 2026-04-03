@@ -1,9 +1,9 @@
 {
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
-  "description": "Index workspace CSS classes and provide completion, hover, and definition support for local global styles.",
-  "version": "0.0.4",
-  "publisher": "local-dev",
+  "description": "Index local CSS classes for completion, hover, and definition. 为本地全局样式提供类名补全、悬停和定义跳转。",
+  "version": "0.0.5",
+  "publisher": "local-css-intellisense",
   "license": "MIT",
   "repository": {
     "type": "git",

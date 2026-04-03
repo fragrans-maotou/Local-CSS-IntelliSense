@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.5
+
+- add bilingual Marketplace-facing README files
+- update extension description for both Chinese and English readers
+
 ## 0.0.4
 
 - show a short CSS declaration summary in completion items
