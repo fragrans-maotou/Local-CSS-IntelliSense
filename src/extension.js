@@ -277,14 +277,160 @@ class CssIndex {
   }
 }
 
+class DocumentStyleResolver {
+  constructor(outputChannel) {
+    this.outputChannel = outputChannel;
+    this.documentCache = new Map();
+    this.styleFileCache = new Map();
+  }
+
+  dispose() {
+    this.documentCache.clear();
+    this.styleFileCache.clear();
+  }
+
+  invalidateDocument(uri) {
+    if (!uri) {
+      return;
+    }
+    this.documentCache.delete(uri.toString());
+  }
+
+  invalidateStyle(uri) {
+    if (!uri) {
+      return;
+    }
+    this.styleFileCache.delete(uri.toString());
+  }
+
+  async getContext(document) {
+    const key = document.uri.toString();
+    const cached = this.documentCache.get(key);
+    if (cached && cached.version === document.version) {
+      return cached.value;
+    }
+
+    const inlineResult = extractInlineStyleContext(document);
+    const importedUris = await this.resolveDocumentStyleUris(document, inlineResult.dependencies);
+    const entries = [...inlineResult.entries];
+    const visited = new Set();
+
+    for (const uri of importedUris) {
+      const fileEntries = await this.collectStyleEntriesFromFile(uri, visited);
+      for (const entry of fileEntries) {
+        entries.push(entry);
+      }
+    }
+
+    const value = {
+      entries,
+      entriesByClass: groupEntriesByClass(entries)
+    };
+
+    this.documentCache.set(key, {
+      version: document.version,
+      value
+    });
+
+    return value;
+  }
+
+  async resolveDocumentStyleUris(document, seedDependencies) {
+    const dependencies = seedDependencies ? [...seedDependencies] : [];
+    const source = document.getText();
+    const importRegex = /\bimport\s+(?:[^"'`]+?\s+from\s+)?["'`]([^"'`]+\.(?:css|scss|less))["'`]/g;
+    const requireRegex = /\brequire\(\s*["'`]([^"'`]+\.(?:css|scss|less))["'`]\s*\)/g;
+    const dynamicImportRegex = /\bimport\(\s*["'`]([^"'`]+\.(?:css|scss|less))["'`]\s*\)/g;
+    const linkRegex = /<link\b[^>]*href=["']([^"']+\.(?:css|scss|less))["'][^>]*>/gi;
+    const styleSrcRegex = /<style\b[^>]*src=["']([^"']+\.(?:css|scss|less))["'][^>]*>/gi;
+
+    collectRegexMatches(importRegex, source, dependencies);
+    collectRegexMatches(requireRegex, source, dependencies);
+    collectRegexMatches(dynamicImportRegex, source, dependencies);
+    collectRegexMatches(linkRegex, source, dependencies);
+    collectRegexMatches(styleSrcRegex, source, dependencies);
+
+    const uris = [];
+    for (const spec of uniqueItems(dependencies)) {
+      const resolved = await resolveStyleSpec(spec, document.uri);
+      if (resolved) {
+        uris.push(resolved);
+      }
+    }
+
+    return uniqueUris(uris);
+  }
+
+  async collectStyleEntriesFromFile(uri, visited) {
+    const key = uri.toString();
+    if (visited.has(key)) {
+      return [];
+    }
+    visited.add(key);
+
+    const fileInfo = await this.loadStyleFile(uri);
+    if (!fileInfo) {
+      return [];
+    }
+
+    const entries = [...fileInfo.entries];
+
+    for (const dependency of fileInfo.dependencies) {
+      const resolvedDependency = await resolveStyleSpec(dependency, uri);
+      if (!resolvedDependency) {
+        continue;
+      }
+
+      const dependencyEntries = await this.collectStyleEntriesFromFile(resolvedDependency, visited);
+      for (const entry of dependencyEntries) {
+        entries.push(entry);
+      }
+    }
+
+    return entries;
+  }
+
+  async loadStyleFile(uri) {
+    if (!shouldIndexStyleUri(uri)) {
+      return undefined;
+    }
+
+    const cacheKey = uri.toString();
+    const stat = await vscode.workspace.fs.stat(uri);
+    const cached = this.styleFileCache.get(cacheKey);
+    if (cached && cached.mtime === stat.mtime && cached.size === stat.size) {
+      return cached.value;
+    }
+
+    const bytes = await vscode.workspace.fs.readFile(uri);
+    const source = Buffer.from(bytes).toString("utf8");
+    const value = {
+      entries: parseCssEntries(source, uri.fsPath),
+      dependencies: extractStyleDependencies(source)
+    };
+
+    this.styleFileCache.set(cacheKey, {
+      mtime: stat.mtime,
+      size: stat.size,
+      value
+    });
+
+    return value;
+  }
+}
+
 function activate(context) {
   const outputChannel = vscode.window.createOutputChannel("Local CSS IntelliSense");
   const cssIndex = new CssIndex(outputChannel);
+  const styleResolver = new DocumentStyleResolver(outputChannel);
   const suggestController = createSuggestController();
 
   context.subscriptions.push(outputChannel);
   context.subscriptions.push({
-    dispose: () => cssIndex.dispose()
+    dispose: () => {
+      cssIndex.dispose();
+      styleResolver.dispose();
+    }
   });
 
   cssIndex.initialize().catch((error) => {
@@ -294,20 +440,35 @@ function activate(context) {
   const completionProvider = vscode.languages.registerCompletionItemProvider(
     SUPPORTED_DOCUMENTS,
     {
-      provideCompletionItems(document, position) {
+      async provideCompletionItems(document, position) {
         const classContext = getClassValueContext(document, position);
         if (!classContext) {
           return undefined;
         }
 
         const tokenInfo = getCurrentClassToken(document, position, classContext);
-        const classes = cssIndex.getClasses();
         const prefix = tokenInfo.text.toLowerCase();
+        const documentContext = await styleResolver.getContext(document);
+        const localClasses = Array.from(documentContext.entriesByClass.keys()).sort((left, right) => left.localeCompare(right));
+        const globalClasses = cssIndex.getClasses();
+        const seen = new Set();
+        const items = [];
 
-        return classes
-          .filter((className) => !prefix || className.toLowerCase().includes(prefix))
-          .slice(0, 200)
-          .map((className) => createCompletionItem(className, cssIndex.getEntries(className), tokenInfo.range));
+        for (const className of [...localClasses, ...globalClasses]) {
+          if (seen.has(className)) {
+            continue;
+          }
+          seen.add(className);
+
+          if (prefix && !className.toLowerCase().includes(prefix)) {
+            continue;
+          }
+
+          const entries = mergeEntries(documentContext.entriesByClass.get(className) || [], cssIndex.getEntries(className));
+          items.push(createCompletionItem(className, entries, tokenInfo.range, documentContext.entriesByClass.has(className)));
+        }
+
+        return items.slice(0, 200);
       }
     },
     " ",
@@ -317,29 +478,34 @@ function activate(context) {
   );
 
   const hoverProvider = vscode.languages.registerHoverProvider(SUPPORTED_DOCUMENTS, {
-    provideHover(document, position) {
+    async provideHover(document, position) {
       const className = getClassNameAtPosition(document, position);
       if (!className) {
         return undefined;
       }
 
-      const entries = cssIndex.getEntries(className);
-      if (!entries.length) {
+      const documentContext = await styleResolver.getContext(document);
+      const localEntries = documentContext.entriesByClass.get(className) || [];
+      const globalEntries = removeDuplicateEntries(cssIndex.getEntries(className), localEntries);
+      if (!localEntries.length && !globalEntries.length) {
         return undefined;
       }
 
-      return new vscode.Hover(buildHoverMarkdown(entries, cssIndex.getHoverLimit()));
+      return new vscode.Hover(buildContextualHoverMarkdown(localEntries, globalEntries, cssIndex.getHoverLimit()));
     }
   });
 
   const definitionProvider = vscode.languages.registerDefinitionProvider(SUPPORTED_DOCUMENTS, {
-    provideDefinition(document, position) {
+    async provideDefinition(document, position) {
       const className = getClassNameAtPosition(document, position);
       if (!className) {
         return undefined;
       }
 
-      const entries = cssIndex.getEntries(className);
+      const documentContext = await styleResolver.getContext(document);
+      const localEntries = documentContext.entriesByClass.get(className) || [];
+      const globalEntries = removeDuplicateEntries(cssIndex.getEntries(className), localEntries);
+      const entries = [...localEntries, ...globalEntries];
       if (!entries.length) {
         return undefined;
       }
@@ -353,19 +519,26 @@ function activate(context) {
   });
 
   const refreshCommand = vscode.commands.registerCommand("localCssIntelliSense.refreshIndex", async () => {
+    styleResolver.dispose();
     await cssIndex.refreshAll("manual refresh");
     cssIndex.resetWatchers();
-    vscode.window.showInformationMessage(`Local CSS IntelliSense indexed ${cssIndex.getClasses().length} class name(s).`);
+    vscode.window.showInformationMessage(`Local CSS IntelliSense indexed ${cssIndex.getClasses().length} global class name(s).`);
   });
 
   const configListener = vscode.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration(EXTENSION_PREFIX)) {
+      styleResolver.dispose();
       cssIndex.resetWatchers();
       cssIndex.scheduleFullRefresh("configuration change");
     }
   });
 
   const typingListener = vscode.workspace.onDidChangeTextDocument((event) => {
+    styleResolver.invalidateDocument(event.document.uri);
+    if (SUPPORTED_STYLE_EXTENSIONS.has(path.extname(event.document.uri.fsPath || "").toLowerCase())) {
+      styleResolver.invalidateStyle(event.document.uri);
+    }
+
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.toString() !== event.document.uri.toString()) {
       return;
@@ -387,30 +560,37 @@ function activate(context) {
     suggestController.schedule();
   });
 
-  context.subscriptions.push(completionProvider, hoverProvider, definitionProvider, refreshCommand, configListener, typingListener);
+  const closeListener = vscode.workspace.onDidCloseTextDocument((document) => {
+    styleResolver.invalidateDocument(document.uri);
+  });
+
+  context.subscriptions.push(completionProvider, hoverProvider, definitionProvider, refreshCommand, configListener, typingListener, closeListener);
 }
 
 function deactivate() {}
 
-function createCompletionItem(className, entries, range) {
+function createCompletionItem(className, entries, range, isContextual) {
   const item = new vscode.CompletionItem(className, vscode.CompletionItemKind.Class);
   const primary = entries[0];
   item.range = range;
   item.insertText = className;
   item.filterText = className;
-  item.sortText = className;
+  item.sortText = `${isContextual ? "0" : "1"}-${className}`;
   item.detail = primary ? createEntrySummary(primary) : "Local CSS class";
   item.description = primary ? path.basename(primary.filePath) : "Local CSS";
-  item.documentation = buildHoverMarkdown(entries, 3, true);
+  item.documentation = buildContextualHoverMarkdown(entries.slice(0, 3), [], 3, true);
   return item;
 }
 
-function parseCssEntries(source, filePath) {
+function parseCssEntries(source, filePath, options = {}) {
   const root = postcss.parse(source, {
     from: filePath,
-    parser: resolveParser(filePath)
+    parser: resolveParser(options.languageExtension || filePath)
   });
   const entries = [];
+  const lineOffset = options.lineOffset || 0;
+  const columnOffset = options.columnOffset || 0;
+  const extraContextLabel = options.contextLabel || "";
 
   root.walkRules((rule) => {
     if (!rule.selector || isInsideKeyframes(rule)) {
@@ -425,21 +605,62 @@ function parseCssEntries(source, filePath) {
     const declarationBlock = collectDeclarations(rule);
     const contextLabel = collectParentAtRules(rule);
     const location = rule.source && rule.source.start ? rule.source.start : { line: 1, column: 1 };
+    const adjustedLine = (location.line || 1) + lineOffset;
+    const adjustedColumn = (location.line || 1) === 1 ? (location.column || 1) + columnOffset : (location.column || 1);
 
     for (const className of classNames) {
       entries.push({
         className,
         selector: rule.selector,
         filePath,
-        line: location.line || 1,
-        column: location.column || 1,
+        line: adjustedLine,
+        column: adjustedColumn,
         declarations: declarationBlock,
-        contextLabel
+        contextLabel: combineContextLabels(extraContextLabel, contextLabel)
       });
     }
   });
 
   return entries;
+}
+
+function extractInlineStyleContext(document) {
+  const source = document.getText();
+  const regex = /<style\b([^>]*)>([\s\S]*?)<\/style>/gi;
+  const entries = [];
+  const dependencies = [];
+  let match;
+
+  while ((match = regex.exec(source)) !== null) {
+    const attributes = match[1] || "";
+    const content = match[2] || "";
+    if (/src\s*=/i.test(attributes)) {
+      continue;
+    }
+
+    const contentOffset = match.index + match[0].indexOf(content);
+    const contentPosition = document.positionAt(contentOffset);
+    const languageExtension = resolveStyleLanguageExtension(attributes, document.languageId);
+    const inlineEntries = parseCssEntries(content, document.uri.fsPath, {
+      languageExtension,
+      lineOffset: contentPosition.line,
+      columnOffset: contentPosition.character,
+      contextLabel: "inline style"
+    });
+
+    for (const entry of inlineEntries) {
+      entries.push(entry);
+    }
+
+    for (const dependency of extractStyleDependencies(content)) {
+      dependencies.push(dependency);
+    }
+  }
+
+  return {
+    entries,
+    dependencies
+  };
 }
 
 function extractClassNames(selector) {
@@ -489,6 +710,13 @@ function collectParentAtRules(rule) {
   return labels.join(" -> ");
 }
 
+function combineContextLabels(left, right) {
+  if (left && right) {
+    return `${left} -> ${right}`;
+  }
+  return left || right || "";
+}
+
 function isInsideKeyframes(rule) {
   let current = rule.parent;
   while (current) {
@@ -500,10 +728,29 @@ function isInsideKeyframes(rule) {
   return false;
 }
 
-function buildHoverMarkdown(entries, limit, compact = false) {
+function buildContextualHoverMarkdown(localEntries, globalEntries, limit, compact = false) {
   const markdown = new vscode.MarkdownString(undefined, true);
   markdown.isTrusted = false;
   markdown.supportHtml = false;
+
+  appendHoverSection(markdown, compact ? "" : "Current File / Imported Styles", localEntries, limit, compact);
+  appendHoverSection(markdown, compact ? "" : "Global Styles", globalEntries, limit, compact);
+
+  if (!compact && !localEntries.length && !globalEntries.length) {
+    markdown.appendMarkdown("_No matching styles_");
+  }
+
+  return markdown;
+}
+
+function appendHoverSection(markdown, title, entries, limit, compact) {
+  if (!entries.length) {
+    return;
+  }
+
+  if (!compact && title) {
+    markdown.appendMarkdown(`**${title}**\n\n`);
+  }
 
   for (const entry of entries.slice(0, limit)) {
     markdown.appendCodeblock(formatRulePreview(entry), "css");
@@ -518,10 +765,8 @@ function buildHoverMarkdown(entries, limit, compact = false) {
   }
 
   if (entries.length > limit) {
-    markdown.appendMarkdown(`_+${entries.length - limit} more match(es)_`);
+    markdown.appendMarkdown(`_+${entries.length - limit} more match(es)_\n\n`);
   }
-
-  return markdown;
 }
 
 function getClassNameAtPosition(document, position) {
@@ -604,6 +849,54 @@ function uniqueItems(items) {
   return Array.from(new Set(items.filter(Boolean)));
 }
 
+function uniqueUris(uris) {
+  const map = new Map();
+  for (const uri of uris) {
+    map.set(uri.toString(), uri);
+  }
+  return Array.from(map.values());
+}
+
+function groupEntriesByClass(entries) {
+  const map = new Map();
+  for (const entry of entries) {
+    if (!map.has(entry.className)) {
+      map.set(entry.className, []);
+    }
+    map.get(entry.className).push(entry);
+  }
+  return map;
+}
+
+function mergeEntries(leftEntries, rightEntries) {
+  return dedupeEntries([...leftEntries, ...rightEntries]);
+}
+
+function removeDuplicateEntries(entries, duplicates) {
+  const duplicateSignatures = new Set(duplicates.map((entry) => getEntrySignature(entry)));
+  return entries.filter((entry) => !duplicateSignatures.has(getEntrySignature(entry)));
+}
+
+function dedupeEntries(entries) {
+  const seen = new Set();
+  const result = [];
+
+  for (const entry of entries) {
+    const signature = getEntrySignature(entry);
+    if (seen.has(signature)) {
+      continue;
+    }
+    seen.add(signature);
+    result.push(entry);
+  }
+
+  return result;
+}
+
+function getEntrySignature(entry) {
+  return `${entry.filePath}|${entry.line}|${entry.column}|${entry.selector}`;
+}
+
 async function expandConfiguredPatterns(patterns) {
   const expanded = [];
   for (const pattern of patterns) {
@@ -683,6 +976,95 @@ function resolveParser(filePath) {
     return postcssLess;
   }
   return safeParser;
+}
+
+function resolveStyleLanguageExtension(attributes, documentLanguageId) {
+  const languageMatch = attributes.match(/\blang\s*=\s*["']([^"']+)["']/i);
+  if (languageMatch) {
+    const language = languageMatch[1].toLowerCase();
+    if (language === "scss" || language === "sass") {
+      return ".scss";
+    }
+    if (language === "less") {
+      return ".less";
+    }
+  }
+
+  if (documentLanguageId === "vue" || documentLanguageId === "svelte" || documentLanguageId === "astro" || documentLanguageId === "html") {
+    return ".css";
+  }
+
+  return ".css";
+}
+
+async function resolveStyleSpec(spec, fromUri) {
+  if (!spec) {
+    return undefined;
+  }
+
+  const normalizedSpec = spec.trim();
+  if (/^(https?:)?\/\//i.test(normalizedSpec)) {
+    return undefined;
+  }
+
+  const candidates = [];
+  if (normalizedSpec.startsWith("/")) {
+    for (const folder of vscode.workspace.workspaceFolders || []) {
+      candidates.push(vscode.Uri.joinPath(folder.uri, normalizedSpec.slice(1)));
+    }
+  } else {
+    const baseDirectory = vscode.Uri.file(path.dirname(fromUri.fsPath));
+    candidates.push(vscode.Uri.joinPath(baseDirectory, normalizedSpec));
+  }
+
+  for (const candidate of buildStyleResolutionCandidates(candidates)) {
+    try {
+      const stat = await vscode.workspace.fs.stat(candidate);
+      if (stat.type & vscode.FileType.File && shouldIndexStyleUri(candidate)) {
+        return candidate;
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return undefined;
+}
+
+function buildStyleResolutionCandidates(baseCandidates) {
+  const allCandidates = [];
+  for (const candidate of baseCandidates) {
+    allCandidates.push(candidate);
+
+    const extension = path.extname(candidate.fsPath).toLowerCase();
+    if (!extension) {
+      for (const candidateExtension of SUPPORTED_STYLE_EXTENSIONS) {
+        allCandidates.push(vscode.Uri.file(`${candidate.fsPath}${candidateExtension}`));
+      }
+    }
+  }
+
+  return uniqueUris(allCandidates);
+}
+
+function extractStyleDependencies(source) {
+  const dependencies = [];
+  const importRegex = /@import\s+(?:url\(\s*)?["']([^"')]+(?:\.css|\.scss|\.less))["']\s*\)?/gi;
+  const useRegex = /@(use|forward)\s+["']([^"']+(?:\.css|\.scss|\.less))["']/gi;
+
+  collectRegexMatches(importRegex, source, dependencies, 1);
+  collectRegexMatches(useRegex, source, dependencies, 2);
+
+  return uniqueItems(dependencies);
+}
+
+function collectRegexMatches(regex, source, target, captureIndex = 1) {
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    if (match[captureIndex]) {
+      target.push(match[captureIndex]);
+    }
+  }
 }
 
 function toGlobUnion(items) {

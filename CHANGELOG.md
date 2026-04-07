@@ -5,6 +5,8 @@
 - consolidate the extension into a single `src/extension.js` entry file
 - narrow default auto-indexing to likely global style paths
 - keep build output, `node_modules`, minified files, and CSS Modules out of the index by default
+- resolve current-document inline styles and directly imported style files for hover and definition
+- show current-document-related styles alongside global styles for the same class
 
 ## 0.0.5
 
