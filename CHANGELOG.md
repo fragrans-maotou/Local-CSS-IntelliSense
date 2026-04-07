@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.6
+
+- consolidate the extension into a single `src/extension.js` entry file
+- narrow default auto-indexing to likely global style paths
+- keep build output, `node_modules`, minified files, and CSS Modules out of the index by default
+
 ## 0.0.5
 
 - add bilingual Marketplace-facing README files

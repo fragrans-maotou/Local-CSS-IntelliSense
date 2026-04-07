@@ -7,16 +7,61 @@ const postcssScss = require("postcss-scss");
 const selectorParser = require("postcss-selector-parser");
 
 const EXTENSION_PREFIX = "localCssIntelliSense";
-const DEFAULT_INCLUDE = ["**/*.css", "**/*.scss", "**/*.less"];
+const DEFAULT_INCLUDE = [
+  "**/src/styles/**/*.css",
+  "**/src/styles/**/*.scss",
+  "**/src/styles/**/*.less",
+  "**/src/assets/styles/**/*.css",
+  "**/src/assets/styles/**/*.scss",
+  "**/src/assets/styles/**/*.less",
+  "**/styles/**/*.css",
+  "**/styles/**/*.scss",
+  "**/styles/**/*.less",
+  "**/style/**/*.css",
+  "**/style/**/*.scss",
+  "**/style/**/*.less",
+  "**/global.css",
+  "**/global.scss",
+  "**/global.less",
+  "**/globals.css",
+  "**/globals.scss",
+  "**/globals.less",
+  "**/base.css",
+  "**/base.scss",
+  "**/base.less",
+  "**/common.css",
+  "**/common.scss",
+  "**/common.less",
+  "**/theme.css",
+  "**/theme.scss",
+  "**/theme.less",
+  "**/reset.css",
+  "**/reset.scss",
+  "**/reset.less",
+  "**/variables.css",
+  "**/variables.scss",
+  "**/variables.less"
+];
 const DEFAULT_EXCLUDE = [
   "**/node_modules/**",
   "**/dist/**",
   "**/build/**",
   "**/.next/**",
+  "**/.nuxt/**",
   "**/coverage/**",
   "**/.git/**",
-  "**/out/**"
+  "**/out/**",
+  "**/vendor/**",
+  "**/vendors/**",
+  "**/*.module.css",
+  "**/*.module.scss",
+  "**/*.module.less",
+  "**/*.min.css",
+  "**/*.min.scss",
+  "**/*.min.less"
 ];
+const CLASS_INPUT_TRIGGER_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_".split("");
+const SUPPORTED_STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
 const SUPPORTED_DOCUMENTS = [
   { language: "html", scheme: "file" },
   { language: "html", scheme: "untitled" },
@@ -52,8 +97,8 @@ class CssIndex {
     return {
       enableAutoIndex: config.get("enableAutoIndex", true),
       entryFiles: normalizeArray(config.get("entryFiles", [])),
-      include: normalizeArray(config.get("include", DEFAULT_INCLUDE)),
-      exclude: normalizeArray(config.get("exclude", DEFAULT_EXCLUDE)),
+      include: uniqueItems(normalizeArray(config.get("include", DEFAULT_INCLUDE))),
+      exclude: uniqueItems([...DEFAULT_EXCLUDE, ...normalizeArray(config.get("exclude", []))]),
       maxFileSizeKB: Number(config.get("maxFileSizeKB", 500)) || 500,
       maxEntriesPerHover: Number(config.get("maxEntriesPerHover", 5)) || 5
     };
@@ -105,11 +150,7 @@ class CssIndex {
 
   async collectFiles() {
     const settings = this.getSettings();
-    const globs = new Set();
-
-    for (const pattern of settings.entryFiles) {
-      globs.add(pattern);
-    }
+    const globs = new Set(await expandConfiguredPatterns(settings.entryFiles));
 
     if (settings.enableAutoIndex) {
       for (const pattern of settings.include.length ? settings.include : DEFAULT_INCLUDE) {
@@ -123,7 +164,9 @@ class CssIndex {
     for (const pattern of globs) {
       const matches = await vscode.workspace.findFiles(pattern, exclude || undefined);
       for (const uri of matches) {
-        fileMap.set(uri.toString(), uri);
+        if (shouldIndexStyleUri(uri)) {
+          fileMap.set(uri.toString(), uri);
+        }
       }
     }
 
@@ -138,7 +181,7 @@ class CssIndex {
 
     const settings = this.getSettings();
     const watchPatterns = new Set([
-      ...settings.entryFiles,
+      ...expandConfiguredPatternsSync(settings.entryFiles),
       ...(settings.enableAutoIndex ? settings.include : [])
     ]);
 
@@ -158,7 +201,8 @@ class CssIndex {
   }
 
   async indexFile(uri) {
-    if (!isWorkspaceFile(uri)) {
+    if (!isWorkspaceFile(uri) || !shouldIndexStyleUri(uri)) {
+      this.removeFile(uri);
       return;
     }
 
@@ -210,7 +254,10 @@ class CssIndex {
         continue;
       }
 
-      const nextBucket = bucket.filter((item) => !(item.filePath === entry.filePath && item.selector === entry.selector && item.line === entry.line));
+      const nextBucket = bucket.filter((item) => {
+        return !(item.filePath === entry.filePath && item.selector === entry.selector && item.line === entry.line);
+      });
+
       if (nextBucket.length) {
         this.entriesByClass.set(entry.className, nextBucket);
       } else {
@@ -233,6 +280,7 @@ class CssIndex {
 function activate(context) {
   const outputChannel = vscode.window.createOutputChannel("Local CSS IntelliSense");
   const cssIndex = new CssIndex(outputChannel);
+  const suggestController = createSuggestController();
 
   context.subscriptions.push(outputChannel);
   context.subscriptions.push({
@@ -247,11 +295,12 @@ function activate(context) {
     SUPPORTED_DOCUMENTS,
     {
       provideCompletionItems(document, position) {
-        if (!isClassValueContext(document, position)) {
+        const classContext = getClassValueContext(document, position);
+        if (!classContext) {
           return undefined;
         }
 
-        const tokenInfo = getCurrentClassToken(document, position);
+        const tokenInfo = getCurrentClassToken(document, position, classContext);
         const classes = cssIndex.getClasses();
         const prefix = tokenInfo.text.toLowerCase();
 
@@ -279,7 +328,7 @@ function activate(context) {
         return undefined;
       }
 
-      return new vscode.Hover(buildHoverMarkdown(className, entries, cssIndex.getHoverLimit()));
+      return new vscode.Hover(buildHoverMarkdown(entries, cssIndex.getHoverLimit()));
     }
   });
 
@@ -316,7 +365,29 @@ function activate(context) {
     }
   });
 
-  context.subscriptions.push(completionProvider, hoverProvider, definitionProvider, refreshCommand, configListener);
+  const typingListener = vscode.workspace.onDidChangeTextDocument((event) => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.uri.toString() !== event.document.uri.toString()) {
+      return;
+    }
+
+    if (editor.selections.length !== 1 || !editor.selection.isEmpty) {
+      return;
+    }
+
+    const change = event.contentChanges[event.contentChanges.length - 1];
+    if (!change || change.text.length !== 1 || !CLASS_INPUT_TRIGGER_CHARS.includes(change.text)) {
+      return;
+    }
+
+    if (!getClassValueContext(editor.document, editor.selection.active)) {
+      return;
+    }
+
+    suggestController.schedule();
+  });
+
+  context.subscriptions.push(completionProvider, hoverProvider, definitionProvider, refreshCommand, configListener, typingListener);
 }
 
 function deactivate() {}
@@ -328,8 +399,9 @@ function createCompletionItem(className, entries, range) {
   item.insertText = className;
   item.filterText = className;
   item.sortText = className;
-  item.detail = primary ? `${primary.selector} • ${path.basename(primary.filePath)}` : "Local CSS class";
-  item.documentation = buildHoverMarkdown(className, entries, 3);
+  item.detail = primary ? createEntrySummary(primary) : "Local CSS class";
+  item.description = primary ? path.basename(primary.filePath) : "Local CSS";
+  item.documentation = buildHoverMarkdown(entries, 3, true);
   return item;
 }
 
@@ -428,21 +500,21 @@ function isInsideKeyframes(rule) {
   return false;
 }
 
-function buildHoverMarkdown(className, entries, limit) {
+function buildHoverMarkdown(entries, limit, compact = false) {
   const markdown = new vscode.MarkdownString(undefined, true);
   markdown.isTrusted = false;
   markdown.supportHtml = false;
-  markdown.appendMarkdown(`**.${escapeMarkdown(className)}**\n\n`);
 
   for (const entry of entries.slice(0, limit)) {
-    const relativePath = vscode.workspace.asRelativePath(entry.filePath, false);
-    markdown.appendMarkdown(`\`${escapeMarkdown(entry.selector)}\`  \n`);
-    markdown.appendCodeblock(entry.declarations, "css");
-    markdown.appendMarkdown(`Source: \`${escapeMarkdown(relativePath)}:${entry.line}\``);
-    if (entry.contextLabel) {
-      markdown.appendMarkdown(`  \nContext: \`${escapeMarkdown(entry.contextLabel)}\``);
+    markdown.appendCodeblock(formatRulePreview(entry), "css");
+    if (!compact) {
+      const relativePath = vscode.workspace.asRelativePath(entry.filePath, false).replace(/\\/g, "/");
+      markdown.appendMarkdown(`Source: \`${escapeMarkdown(relativePath)}:${entry.line}\``);
+      if (entry.contextLabel) {
+        markdown.appendMarkdown(`  \nContext: \`${escapeMarkdown(entry.contextLabel)}\``);
+      }
+      markdown.appendMarkdown("\n\n");
     }
-    markdown.appendMarkdown("\n\n");
   }
 
   if (entries.length > limit) {
@@ -453,6 +525,10 @@ function buildHoverMarkdown(className, entries, limit) {
 }
 
 function getClassNameAtPosition(document, position) {
+  if (!getClassValueContext(document, position)) {
+    return undefined;
+  }
+
   const range = document.getWordRangeAtPosition(position, /[_a-zA-Z][\w-]*/);
   if (!range) {
     return undefined;
@@ -466,16 +542,16 @@ function getClassNameAtPosition(document, position) {
   return normalizeClassName(token);
 }
 
-function getCurrentClassToken(document, position) {
+function getCurrentClassToken(document, position, classContext) {
   const line = document.lineAt(position.line).text;
-  let start = position.character;
+  let start = Math.max(classContext.valueStart, position.character);
   let end = position.character;
 
-  while (start > 0 && /[\w-]/.test(line[start - 1])) {
+  while (start > classContext.valueStart && /[\w-]/.test(line[start - 1])) {
     start -= 1;
   }
 
-  while (end < line.length && /[\w-]/.test(line[end])) {
+  while (end < classContext.valueEnd && /[\w-]/.test(line[end])) {
     end += 1;
   }
 
@@ -485,20 +561,35 @@ function getCurrentClassToken(document, position) {
   };
 }
 
-function isClassValueContext(document, position) {
-  const offset = document.offsetAt(position);
-  const startOffset = Math.max(0, offset - 200);
-  const endOffset = Math.min(document.getText().length, offset + 50);
-  const range = new vscode.Range(document.positionAt(startOffset), document.positionAt(endOffset));
-  const snippet = document.getText(range);
-  const relativeOffset = offset - startOffset;
-  const beforeCursor = snippet.slice(0, relativeOffset);
+function getClassValueContext(document, position) {
+  const line = document.lineAt(position.line).text;
+  const beforeCursor = line.slice(0, position.character);
+  const quoteIndex = Math.max(beforeCursor.lastIndexOf("\""), beforeCursor.lastIndexOf("'"), beforeCursor.lastIndexOf("`"));
+  if (quoteIndex < 0) {
+    return undefined;
+  }
 
-  return (
-    /(class|className)\s*=\s*["'`][^"'`]*$/i.test(beforeCursor) ||
-    /:class\s*=\s*["'`][^"'`]*$/i.test(beforeCursor) ||
-    /clsx\(\s*["'`][^"'`]*$/i.test(beforeCursor)
-  );
+  const quoteChar = beforeCursor[quoteIndex];
+  const attributePrefix = beforeCursor.slice(Math.max(0, quoteIndex - 40), quoteIndex);
+  const isAttributeValue = /(?:^|[\s<(])(?:class|className|:class)\s*=\s*$/i.test(attributePrefix);
+  const isClsxValue = /clsx\(\s*$/.test(attributePrefix);
+  if (!isAttributeValue && !isClsxValue) {
+    return undefined;
+  }
+
+  const afterQuote = line.slice(quoteIndex + 1);
+  const closingRelativeIndex = afterQuote.indexOf(quoteChar);
+  const valueStart = quoteIndex + 1;
+  const valueEnd = closingRelativeIndex >= 0 ? valueStart + closingRelativeIndex : line.length;
+
+  if (position.character < valueStart || position.character > valueEnd) {
+    return undefined;
+  }
+
+  return {
+    valueStart,
+    valueEnd
+  };
 }
 
 function normalizeClassName(token) {
@@ -507,6 +598,80 @@ function normalizeClassName(token) {
 
 function normalizeArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+function uniqueItems(items) {
+  return Array.from(new Set(items.filter(Boolean)));
+}
+
+async function expandConfiguredPatterns(patterns) {
+  const expanded = [];
+  for (const pattern of patterns) {
+    const resolved = await resolveConfiguredPattern(pattern);
+    for (const item of resolved) {
+      expanded.push(item);
+    }
+  }
+  return expanded;
+}
+
+function expandConfiguredPatternsSync(patterns) {
+  const expanded = [];
+  for (const pattern of patterns) {
+    for (const item of resolveConfiguredPatternSync(pattern)) {
+      expanded.push(item);
+    }
+  }
+  return expanded;
+}
+
+async function resolveConfiguredPattern(pattern) {
+  if (!pattern) {
+    return [];
+  }
+
+  if (hasGlobSyntax(pattern)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  const ext = path.extname(pattern).toLowerCase();
+  if (SUPPORTED_STYLE_EXTENSIONS.has(ext)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  const candidates = getWorkspaceCandidateUris(pattern);
+  for (const uri of candidates) {
+    try {
+      const stat = await vscode.workspace.fs.stat(uri);
+      if (stat.type & vscode.FileType.Directory) {
+        return [toDirectoryGlob(pattern)];
+      }
+      if (stat.type & vscode.FileType.File) {
+        return [normalizeGlobSlashes(pattern)];
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return [toDirectoryGlob(pattern)];
+}
+
+function resolveConfiguredPatternSync(pattern) {
+  if (!pattern) {
+    return [];
+  }
+
+  if (hasGlobSyntax(pattern)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  const ext = path.extname(pattern).toLowerCase();
+  if (SUPPORTED_STYLE_EXTENSIONS.has(ext)) {
+    return [normalizeGlobSlashes(pattern)];
+  }
+
+  return [toDirectoryGlob(pattern)];
 }
 
 function resolveParser(filePath) {
@@ -539,6 +704,102 @@ function isWorkspaceFile(uri) {
     return false;
   }
   return Boolean(vscode.workspace.getWorkspaceFolder(uri));
+}
+
+function shouldIndexStyleUri(uri) {
+  if (!uri || uri.scheme !== "file") {
+    return false;
+  }
+
+  const normalizedPath = uri.fsPath.replace(/\\/g, "/").toLowerCase();
+  const extension = path.extname(normalizedPath);
+  if (!SUPPORTED_STYLE_EXTENSIONS.has(extension)) {
+    return false;
+  }
+
+  if (
+    normalizedPath.includes("/node_modules/") ||
+    normalizedPath.includes("/dist/") ||
+    normalizedPath.includes("/build/") ||
+    normalizedPath.includes("/coverage/") ||
+    normalizedPath.includes("/.next/") ||
+    normalizedPath.includes("/.nuxt/") ||
+    normalizedPath.includes("/out/") ||
+    normalizedPath.includes("/vendor/") ||
+    normalizedPath.includes("/vendors/")
+  ) {
+    return false;
+  }
+
+  if (
+    normalizedPath.includes(".module.css") ||
+    normalizedPath.includes(".module.scss") ||
+    normalizedPath.includes(".module.less") ||
+    normalizedPath.includes(".min.css") ||
+    normalizedPath.includes(".min.scss") ||
+    normalizedPath.includes(".min.less")
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function formatRulePreview(entry) {
+  const lines = [`${entry.selector} {`];
+  for (const declarationLine of entry.declarations.split("\n")) {
+    lines.push(`  ${declarationLine}`);
+  }
+  lines.push("}");
+  return lines.join("\n");
+}
+
+function createSuggestController() {
+  let timer = undefined;
+
+  return {
+    schedule() {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        vscode.commands.executeCommand("editor.action.triggerSuggest");
+      }, 40);
+    }
+  };
+}
+
+function createEntrySummary(entry) {
+  const oneLine = entry.declarations.replace(/\s+/g, " ").trim();
+  if (!oneLine) {
+    return entry.selector;
+  }
+  if (oneLine.length <= 72) {
+    return oneLine;
+  }
+  return `${oneLine.slice(0, 69)}...`;
+}
+
+function hasGlobSyntax(pattern) {
+  return /[*?[\]{}]/.test(pattern);
+}
+
+function normalizeGlobSlashes(value) {
+  return value.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function toDirectoryGlob(pattern) {
+  const normalized = normalizeGlobSlashes(pattern);
+  return `${normalized}/**/*.{css,scss,less}`;
+}
+
+function getWorkspaceCandidateUris(pattern) {
+  const normalized = pattern.replace(/\//g, path.sep);
+  if (path.isAbsolute(normalized)) {
+    return [vscode.Uri.file(normalized)];
+  }
+
+  return (vscode.workspace.workspaceFolders || []).map((folder) => {
+    return vscode.Uri.joinPath(folder.uri, normalized);
+  });
 }
 
 module.exports = {

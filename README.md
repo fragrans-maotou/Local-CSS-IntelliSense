@@ -11,6 +11,8 @@ It indexes local style classes in your workspace and provides:
 - go to definition / peek definition for local global classes
 - automatic indexing, plus manual file, folder, or glob-based configuration
 
+By default, automatic indexing now focuses on likely global style locations such as `src/styles`, `src/assets/styles`, `styles`, and common files like `global.scss` or `base.css`. Build output, `node_modules`, minified files, and CSS Modules are ignored by default.
+
 ## Why This Extension
 
 This extension is built for projects that rely on local global styles instead of utility-only workflows such as Tailwind CSS.

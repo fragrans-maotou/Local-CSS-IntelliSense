@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Index local CSS classes for completion, hover, and definition. 为本地全局样式提供类名补全、悬停和定义跳转。",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -43,7 +43,7 @@
     "workspaceContains:**/*.scss",
     "workspaceContains:**/*.less"
   ],
-  "main": "./src/extension.runtime.js",
+  "main": "./src/extension.js",
   "contributes": {
     "commands": [
       {
@@ -57,7 +57,7 @@
         "localCssIntelliSense.enableAutoIndex": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically scan the workspace for CSS-like files."
+          "description": "Automatically scan likely global style files and folders in the workspace."
         },
         "localCssIntelliSense.entryFiles": {
           "type": "array",
@@ -70,14 +70,44 @@
         "localCssIntelliSense.include": {
           "type": "array",
           "default": [
-            "**/*.css",
-            "**/*.scss",
-            "**/*.less"
+            "**/src/styles/**/*.css",
+            "**/src/styles/**/*.scss",
+            "**/src/styles/**/*.less",
+            "**/src/assets/styles/**/*.css",
+            "**/src/assets/styles/**/*.scss",
+            "**/src/assets/styles/**/*.less",
+            "**/styles/**/*.css",
+            "**/styles/**/*.scss",
+            "**/styles/**/*.less",
+            "**/style/**/*.css",
+            "**/style/**/*.scss",
+            "**/style/**/*.less",
+            "**/global.css",
+            "**/global.scss",
+            "**/global.less",
+            "**/globals.css",
+            "**/globals.scss",
+            "**/globals.less",
+            "**/base.css",
+            "**/base.scss",
+            "**/base.less",
+            "**/common.css",
+            "**/common.scss",
+            "**/common.less",
+            "**/theme.css",
+            "**/theme.scss",
+            "**/theme.less",
+            "**/reset.css",
+            "**/reset.scss",
+            "**/reset.less",
+            "**/variables.css",
+            "**/variables.scss",
+            "**/variables.less"
           ],
           "items": {
             "type": "string"
           },
-          "description": "Glob patterns used when automatic indexing is enabled."
+          "description": "Glob patterns used when automatic indexing is enabled. Defaults focus on likely global style locations."
         },
         "localCssIntelliSense.exclude": {
           "type": "array",
@@ -86,9 +116,18 @@
             "**/dist/**",
             "**/build/**",
             "**/.next/**",
+            "**/.nuxt/**",
             "**/coverage/**",
             "**/.git/**",
-            "**/out/**"
+            "**/out/**",
+            "**/vendor/**",
+            "**/vendors/**",
+            "**/*.module.css",
+            "**/*.module.scss",
+            "**/*.module.less",
+            "**/*.min.css",
+            "**/*.min.scss",
+            "**/*.min.less"
           ],
           "items": {
             "type": "string"
