@@ -219,7 +219,9 @@ class CssIndex {
 
       const bytes = await vscode.workspace.fs.readFile(uri);
       const source = Buffer.from(bytes).toString("utf8");
-      const parsedEntries = parseCssEntries(source, uri.fsPath);
+      const parsedEntries = parseCssEntries(source, uri.fsPath, {
+        sourceKind: "global"
+      });
       this.replaceFileEntries(uri, parsedEntries);
     } catch (error) {
       this.removeFile(uri);
@@ -405,7 +407,9 @@ class DocumentStyleResolver {
     const bytes = await vscode.workspace.fs.readFile(uri);
     const source = Buffer.from(bytes).toString("utf8");
     const value = {
-      entries: parseCssEntries(source, uri.fsPath),
+      entries: parseCssEntries(source, uri.fsPath, {
+        sourceKind: "imported"
+      }),
       dependencies: extractStyleDependencies(source)
     };
 
@@ -464,7 +468,9 @@ function activate(context) {
             continue;
           }
 
-          const entries = mergeEntries(documentContext.entriesByClass.get(className) || [], cssIndex.getEntries(className));
+          const entries = sortEntriesByPriority(
+            mergeEntries(documentContext.entriesByClass.get(className) || [], cssIndex.getEntries(className))
+          );
           items.push(createCompletionItem(className, entries, tokenInfo.range, documentContext.entriesByClass.has(className)));
         }
 
@@ -485,8 +491,8 @@ function activate(context) {
       }
 
       const documentContext = await styleResolver.getContext(document);
-      const localEntries = documentContext.entriesByClass.get(className) || [];
-      const globalEntries = removeDuplicateEntries(cssIndex.getEntries(className), localEntries);
+      const localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+      const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
       if (!localEntries.length && !globalEntries.length) {
         return undefined;
       }
@@ -503,9 +509,9 @@ function activate(context) {
       }
 
       const documentContext = await styleResolver.getContext(document);
-      const localEntries = documentContext.entriesByClass.get(className) || [];
-      const globalEntries = removeDuplicateEntries(cssIndex.getEntries(className), localEntries);
-      const entries = [...localEntries, ...globalEntries];
+      const localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+      const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
+      const entries = sortEntriesByPriority([...localEntries, ...globalEntries]);
       if (!entries.length) {
         return undefined;
       }
@@ -564,7 +570,27 @@ function activate(context) {
     styleResolver.invalidateDocument(document.uri);
   });
 
-  context.subscriptions.push(completionProvider, hoverProvider, definitionProvider, refreshCommand, configListener, typingListener, closeListener);
+  const styleWatcher = vscode.workspace.createFileSystemWatcher("**/*.{css,scss,less}");
+  styleWatcher.onDidCreate((uri) => {
+    styleResolver.invalidateStyle(uri);
+  });
+  styleWatcher.onDidChange((uri) => {
+    styleResolver.invalidateStyle(uri);
+  });
+  styleWatcher.onDidDelete((uri) => {
+    styleResolver.invalidateStyle(uri);
+  });
+
+  context.subscriptions.push(
+    completionProvider,
+    hoverProvider,
+    definitionProvider,
+    refreshCommand,
+    configListener,
+    typingListener,
+    closeListener,
+    styleWatcher
+  );
 }
 
 function deactivate() {}
@@ -572,13 +598,15 @@ function deactivate() {}
 function createCompletionItem(className, entries, range, isContextual) {
   const item = new vscode.CompletionItem(className, vscode.CompletionItemKind.Class);
   const primary = entries[0];
+  const localEntries = entries.filter((entry) => (entry.sourceKind || "global") !== "global");
+  const globalEntries = entries.filter((entry) => (entry.sourceKind || "global") === "global");
   item.range = range;
   item.insertText = className;
   item.filterText = className;
   item.sortText = `${isContextual ? "0" : "1"}-${className}`;
   item.detail = primary ? createEntrySummary(primary) : "Local CSS class";
   item.description = primary ? path.basename(primary.filePath) : "Local CSS";
-  item.documentation = buildContextualHoverMarkdown(entries.slice(0, 3), [], 3, true);
+  item.documentation = buildContextualHoverMarkdown(localEntries.slice(0, 2), globalEntries.slice(0, 1), 3, true);
   return item;
 }
 
@@ -616,7 +644,8 @@ function parseCssEntries(source, filePath, options = {}) {
         line: adjustedLine,
         column: adjustedColumn,
         declarations: declarationBlock,
-        contextLabel: combineContextLabels(extraContextLabel, contextLabel)
+        contextLabel: combineContextLabels(extraContextLabel, contextLabel),
+        sourceKind: options.sourceKind || "global"
       });
     }
   });
@@ -645,7 +674,8 @@ function extractInlineStyleContext(document) {
       languageExtension,
       lineOffset: contentPosition.line,
       columnOffset: contentPosition.character,
-      contextLabel: "inline style"
+      contextLabel: "inline style",
+      sourceKind: "inline"
     });
 
     for (const entry of inlineEntries) {
@@ -733,7 +763,9 @@ function buildContextualHoverMarkdown(localEntries, globalEntries, limit, compac
   markdown.isTrusted = false;
   markdown.supportHtml = false;
 
-  appendHoverSection(markdown, compact ? "" : "Current File / Imported Styles", localEntries, limit, compact);
+  const localGroups = splitEntriesBySource(localEntries);
+  appendHoverSection(markdown, compact ? "" : "Current File Styles", localGroups.inline, limit, compact);
+  appendHoverSection(markdown, compact ? "" : "Imported Styles", localGroups.imported, limit, compact);
   appendHoverSection(markdown, compact ? "" : "Global Styles", globalEntries, limit, compact);
 
   if (!compact && !localEntries.length && !globalEntries.length) {
@@ -770,16 +802,19 @@ function appendHoverSection(markdown, title, entries, limit, compact) {
 }
 
 function getClassNameAtPosition(document, position) {
-  if (!getClassValueContext(document, position)) {
+  const classContext = getClassValueContext(document, position);
+  if (!classContext) {
     return undefined;
   }
 
-  const range = document.getWordRangeAtPosition(position, /[_a-zA-Z][\w-]*/);
-  if (!range) {
+  const source = document.getText();
+  const offset = document.offsetAt(position);
+  const tokenRange = getClassTokenOffsetRange(source, offset, classContext);
+  if (!tokenRange) {
     return undefined;
   }
 
-  const token = document.getText(range);
+  const token = source.slice(tokenRange.start, tokenRange.end);
   if (!token) {
     return undefined;
   }
@@ -788,52 +823,46 @@ function getClassNameAtPosition(document, position) {
 }
 
 function getCurrentClassToken(document, position, classContext) {
-  const line = document.lineAt(position.line).text;
-  let start = Math.max(classContext.valueStart, position.character);
-  let end = position.character;
+  const source = document.getText();
+  const offset = document.offsetAt(position);
+  let start = offset;
+  let end = offset;
 
-  while (start > classContext.valueStart && /[\w-]/.test(line[start - 1])) {
+  while (start > classContext.valueStartOffset && /[\w-]/.test(source[start - 1])) {
     start -= 1;
   }
 
-  while (end < classContext.valueEnd && /[\w-]/.test(line[end])) {
+  while (end < classContext.valueEndOffset && /[\w-]/.test(source[end])) {
     end += 1;
   }
 
   return {
-    text: line.slice(start, position.character),
-    range: new vscode.Range(position.line, start, position.line, end)
+    text: source.slice(start, offset),
+    range: new vscode.Range(document.positionAt(start), document.positionAt(end))
   };
 }
 
 function getClassValueContext(document, position) {
-  const line = document.lineAt(position.line).text;
-  const beforeCursor = line.slice(0, position.character);
-  const quoteIndex = Math.max(beforeCursor.lastIndexOf("\""), beforeCursor.lastIndexOf("'"), beforeCursor.lastIndexOf("`"));
-  if (quoteIndex < 0) {
+  const source = document.getText();
+  const offset = document.offsetAt(position);
+  const openingQuoteIndex = findMatchingClassQuoteStart(source, offset);
+  if (openingQuoteIndex < 0) {
     return undefined;
   }
 
-  const quoteChar = beforeCursor[quoteIndex];
-  const attributePrefix = beforeCursor.slice(Math.max(0, quoteIndex - 40), quoteIndex);
-  const isAttributeValue = /(?:^|[\s<(])(?:class|className|:class)\s*=\s*$/i.test(attributePrefix);
-  const isClsxValue = /clsx\(\s*$/.test(attributePrefix);
-  if (!isAttributeValue && !isClsxValue) {
-    return undefined;
-  }
+  const quoteChar = source[openingQuoteIndex];
+  const closingQuoteIndex = findClosingQuote(source, openingQuoteIndex, quoteChar);
+  const valueStartOffset = openingQuoteIndex + 1;
+  const valueEndOffset = closingQuoteIndex >= 0 ? closingQuoteIndex : source.length;
 
-  const afterQuote = line.slice(quoteIndex + 1);
-  const closingRelativeIndex = afterQuote.indexOf(quoteChar);
-  const valueStart = quoteIndex + 1;
-  const valueEnd = closingRelativeIndex >= 0 ? valueStart + closingRelativeIndex : line.length;
-
-  if (position.character < valueStart || position.character > valueEnd) {
+  if (offset < valueStartOffset || offset > valueEndOffset) {
     return undefined;
   }
 
   return {
-    valueStart,
-    valueEnd
+    valueStartOffset,
+    valueEndOffset,
+    quoteChar
   };
 }
 
@@ -895,6 +924,54 @@ function dedupeEntries(entries) {
 
 function getEntrySignature(entry) {
   return `${entry.filePath}|${entry.line}|${entry.column}|${entry.selector}`;
+}
+
+function splitEntriesBySource(entries) {
+  const inline = [];
+  const imported = [];
+
+  for (const entry of entries) {
+    if ((entry.sourceKind || "global") === "inline") {
+      inline.push(entry);
+    } else {
+      imported.push(entry);
+    }
+  }
+
+  return { inline, imported };
+}
+
+function sortEntriesByPriority(entries) {
+  return [...entries].sort((left, right) => {
+    const priorityDiff = getEntryPriority(left) - getEntryPriority(right);
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    const fileDiff = left.filePath.localeCompare(right.filePath);
+    if (fileDiff !== 0) {
+      return fileDiff;
+    }
+
+    if (left.line !== right.line) {
+      return left.line - right.line;
+    }
+
+    return left.column - right.column;
+  });
+}
+
+function getEntryPriority(entry) {
+  if (!entry || !entry.sourceKind) {
+    return 2;
+  }
+  if (entry.sourceKind === "inline") {
+    return 0;
+  }
+  if (entry.sourceKind === "imported") {
+    return 1;
+  }
+  return 2;
 }
 
 async function expandConfiguredPatterns(patterns) {
@@ -1008,13 +1085,31 @@ async function resolveStyleSpec(spec, fromUri) {
   }
 
   const candidates = [];
+  const workspaceFolders = vscode.workspace.workspaceFolders || [];
   if (normalizedSpec.startsWith("/")) {
-    for (const folder of vscode.workspace.workspaceFolders || []) {
+    for (const folder of workspaceFolders) {
       candidates.push(vscode.Uri.joinPath(folder.uri, normalizedSpec.slice(1)));
+    }
+  } else if (normalizedSpec.startsWith("@/")) {
+    for (const folder of workspaceFolders) {
+      candidates.push(vscode.Uri.joinPath(folder.uri, "src", normalizedSpec.slice(2)));
+      candidates.push(vscode.Uri.joinPath(folder.uri, normalizedSpec.slice(2)));
+    }
+  } else if (normalizedSpec.startsWith("~/")) {
+    for (const folder of workspaceFolders) {
+      candidates.push(vscode.Uri.joinPath(folder.uri, normalizedSpec.slice(2)));
+      candidates.push(vscode.Uri.joinPath(folder.uri, "src", normalizedSpec.slice(2)));
     }
   } else {
     const baseDirectory = vscode.Uri.file(path.dirname(fromUri.fsPath));
     candidates.push(vscode.Uri.joinPath(baseDirectory, normalizedSpec));
+
+    if (!normalizedSpec.startsWith("./") && !normalizedSpec.startsWith("../")) {
+      for (const folder of workspaceFolders) {
+        candidates.push(vscode.Uri.joinPath(folder.uri, normalizedSpec));
+        candidates.push(vscode.Uri.joinPath(folder.uri, "src", normalizedSpec));
+      }
+    }
   }
 
   for (const candidate of buildStyleResolutionCandidates(candidates)) {
@@ -1188,3 +1283,69 @@ module.exports = {
   activate,
   deactivate
 };
+
+function getClassTokenOffsetRange(source, offset, classContext) {
+  let start = offset;
+  let end = offset;
+
+  while (start > classContext.valueStartOffset && /[\w-]/.test(source[start - 1])) {
+    start -= 1;
+  }
+
+  while (end < classContext.valueEndOffset && /[\w-]/.test(source[end])) {
+    end += 1;
+  }
+
+  if (start === end) {
+    return undefined;
+  }
+
+  return { start, end };
+}
+
+function findMatchingClassQuoteStart(source, offset) {
+  const minIndex = Math.max(0, offset - 4000);
+  for (let index = Math.min(offset - 1, source.length - 1); index >= minIndex; index -= 1) {
+    const char = source[index];
+    if (!isQuoteCharacter(char) || isEscapedCharacter(source, index)) {
+      continue;
+    }
+
+    const prefix = source.slice(Math.max(0, index - 160), index);
+    const isAttributeValue = /(?:^|[\s<(])(?:class|className|:class)\s*=\s*$/i.test(prefix);
+    const isClsxValue = /(?:clsx|classnames)\(\s*$/.test(prefix);
+    if (!isAttributeValue && !isClsxValue) {
+      continue;
+    }
+
+    const closingQuoteIndex = findClosingQuote(source, index, char);
+    if (closingQuoteIndex >= 0 && closingQuoteIndex < offset) {
+      continue;
+    }
+
+    return index;
+  }
+
+  return -1;
+}
+
+function findClosingQuote(source, openingIndex, quoteChar) {
+  for (let index = openingIndex + 1; index < source.length; index += 1) {
+    if (source[index] === quoteChar && !isEscapedCharacter(source, index)) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function isEscapedCharacter(source, index) {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && source[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+}
+
+function isQuoteCharacter(char) {
+  return char === "\"" || char === "'" || char === "`";
+}

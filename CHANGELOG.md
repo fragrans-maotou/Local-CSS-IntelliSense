@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.7
+
+- fix hover, definition, and class detection for multi-line `class`, `className`, and `:class` values
+- sort matching rules as current-file styles, imported styles, then global styles
+- watch local style-file changes so hover and definition stay in sync
+- resolve common workspace aliases such as `@/` and `~/` for imported style files
+
 ## 0.0.6
 
 - consolidate the extension into a single `src/extension.js` entry file
