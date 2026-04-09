@@ -1,6 +1,6 @@
 # Local CSS IntelliSense
 
-[中文](./README.zh-CN.md) | [English](./README.md)
+[中文](./README.zh-CN.md) | [English](./README.en-US.md)
 
 `Local CSS IntelliSense` 是一个面向本地样式体系的 VS Code 插件，适合团队维护自己的 `css / scss / less` 全局样式、页面样式和局部引入样式时使用。
 

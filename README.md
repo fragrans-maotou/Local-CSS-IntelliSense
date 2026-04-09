@@ -1,6 +1,6 @@
 # Local CSS IntelliSense
 
-[中文](./README.zh-CN.md) | English
+[中文](./README.zh-CN.md) | [English](./README.en-US.md)
 
 ## 中文说明
 
