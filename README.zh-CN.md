@@ -1,36 +1,48 @@
 # Local CSS IntelliSense
 
-简体中文 | [English](./README.md)
+[中文](./README.zh-CN.md) | [English](./README.md)
 
-`Local CSS IntelliSense` 是一个面向本地全局样式项目的 VS Code 插件，适合团队维护自己的 `css / scss / less` 样式体系时使用。
+`Local CSS IntelliSense` 是一个面向本地样式体系的 VS Code 插件，适合团队维护自己的 `css / scss / less` 全局样式、页面样式和局部引入样式时使用。
 
-它会索引当前工作区里的本地样式类名，并提供：
+## 解决什么问题
 
-- 在 `class=""`、`className=""` 和常见 Vue class 绑定中的类名补全
-- 悬停查看原始 CSS 规则内容
-- 跳转到类名定义 / Peek Definition
-- 自动索引，以及手动配置文件、文件夹、glob 的索引方式
+- 记不住项目里已经有哪些类名
+- 鼠标指到 class 时，看不到样式内容
+- 想跳到样式定义时，不知道它来自当前文件、引入文件，还是全局样式
 
-## 适用场景
+## 当前能力
 
-这个插件更适合下面这类项目：
+- 在 `class=""`、`className=""`、常见 `:class` 场景里提供类名补全
+- 鼠标悬停类名时展示对应 CSS 规则内容
+- 支持 `Go to Definition / Peek Definition`
+- 同时展示当前文件样式、当前文件引入的样式、全局样式
+- 自动索引工作区中更像“全局样式入口”的目录和文件
+- 支持手动配置文件、文件夹、glob 作为索引入口
 
-- 团队长期维护自定义全局样式
-- 类名很多，但并不是 Tailwind 这类原子化方案
-- 经常忘记某个类写在哪里、具体长什么样
-- 希望在写模板时直接看到已有样式，而不是频繁切换文件
+## 默认索引范围
 
-## 功能说明
+插件默认优先扫描这些更像全局样式的路径：
 
-- 索引当前工作区中的 `css`、`scss`、`less`
-- 文件变更后自动更新缓存
-- 在补全列表中显示样式摘要
-- 悬停时展示完整规则块
-- 支持直接跳转到样式定义位置
+- `src/styles`
+- `src/assets/styles`
+- `styles`
+- `style`
+- `global.css / global.scss / base.css / common.scss / theme.css` 等常见入口
+
+默认会忽略这些内容：
+
+- `node_modules`
+- `dist`
+- `build`
+- `.next`
+- `.nuxt`
+- `coverage`
+- CSS Modules
+- `.min.css / .min.scss / .min.less`
 
 ## 配置项
 
-在 VS Code 设置中搜索 `Local CSS IntelliSense`。
+在 VS Code 设置中搜索 `Local CSS IntelliSense`，常用配置有：
 
 - `localCssIntelliSense.enableAutoIndex`
 - `localCssIntelliSense.entryFiles`
@@ -56,42 +68,37 @@
 }
 ```
 
-`entryFiles` 现在支持三种写法：
+`entryFiles` 支持三种写法：
 
-- 单个文件，例如 `src/styles/global.css`
-- 单个文件夹，例如 `src/styles`
-- glob 模式，例如 `src/styles/**/*.scss`
+- 单个文件：`src/styles/global.css`
+- 单个文件夹：`src/styles`
+- glob：`src/styles/**/*.scss`
 
-## 本地开发
+## 开发与调试
 
-1. 安装依赖：
+1. 安装依赖
 
 ```bash
 npm install
 ```
 
-2. 用 VS Code 打开当前目录。
-3. 按 `F5` 启动 Extension Development Host。
-4. 打开任意包含 CSS 文件的项目并测试：
-   - 在 `class=""` 里输入类名
-   - 悬停在类名上看样式
-   - 对类名执行 `Go to Definition`
+2. 用 VS Code 打开当前目录
+3. 按 `F5` 启动 Extension Development Host
+4. 在测试项目里试这些场景：
+
+- 在 `class=""` 中输入类名
+- 鼠标悬停类名
+- 对类名执行 `Go to Definition`
 
 ## 命令
 
 - `Local CSS IntelliSense: Refresh Index`
 
-## 当前范围
+## 设计文档
 
-当前版本主要聚焦“本地全局样式”，暂时不打算完整覆盖：
-
-- CSS Modules
-- 运行时动态拼接类名
-- 各框架非常复杂的 class 表达式分析
+- [插件设计文档](./docs/ARCHITECTURE.md)
 
 ## 打包
-
-如果你要本地生成 `.vsix` 安装包：
 
 ```bash
 npm install -g @vscode/vsce

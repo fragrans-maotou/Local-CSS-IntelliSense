@@ -1,0 +1,88 @@
+const EXTENSION_PREFIX = "localCssIntelliSense";
+
+const DEFAULT_INCLUDE = [
+  "**/src/styles/**/*.css",
+  "**/src/styles/**/*.scss",
+  "**/src/styles/**/*.less",
+  "**/src/assets/styles/**/*.css",
+  "**/src/assets/styles/**/*.scss",
+  "**/src/assets/styles/**/*.less",
+  "**/styles/**/*.css",
+  "**/styles/**/*.scss",
+  "**/styles/**/*.less",
+  "**/style/**/*.css",
+  "**/style/**/*.scss",
+  "**/style/**/*.less",
+  "**/global.css",
+  "**/global.scss",
+  "**/global.less",
+  "**/globals.css",
+  "**/globals.scss",
+  "**/globals.less",
+  "**/base.css",
+  "**/base.scss",
+  "**/base.less",
+  "**/common.css",
+  "**/common.scss",
+  "**/common.less",
+  "**/theme.css",
+  "**/theme.scss",
+  "**/theme.less",
+  "**/reset.css",
+  "**/reset.scss",
+  "**/reset.less",
+  "**/variables.css",
+  "**/variables.scss",
+  "**/variables.less"
+];
+
+const DEFAULT_EXCLUDE = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/.next/**",
+  "**/.nuxt/**",
+  "**/coverage/**",
+  "**/.git/**",
+  "**/out/**",
+  "**/vendor/**",
+  "**/vendors/**",
+  "**/*.module.css",
+  "**/*.module.scss",
+  "**/*.module.less",
+  "**/*.min.css",
+  "**/*.min.scss",
+  "**/*.min.less"
+];
+
+const CLASS_INPUT_TRIGGER_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_".split("");
+const SUPPORTED_STYLE_EXTENSIONS = new Set([".css", ".scss", ".less"]);
+const SUPPORTED_DOCUMENTS = [
+  { language: "html", scheme: "file" },
+  { language: "html", scheme: "untitled" },
+  { language: "javascriptreact", scheme: "file" },
+  { language: "javascriptreact", scheme: "untitled" },
+  { language: "typescriptreact", scheme: "file" },
+  { language: "typescriptreact", scheme: "untitled" },
+  { language: "vue", scheme: "file" },
+  { language: "vue", scheme: "untitled" },
+  { language: "svelte", scheme: "file" },
+  { language: "svelte", scheme: "untitled" },
+  { language: "astro", scheme: "file" },
+  { language: "astro", scheme: "untitled" },
+  { language: "php", scheme: "file" },
+  { language: "php", scheme: "untitled" },
+  { language: "javascript", scheme: "file" },
+  { language: "javascript", scheme: "untitled" },
+  { language: "typescript", scheme: "file" },
+  { language: "typescript", scheme: "untitled" }
+];
+
+module.exports = {
+  EXTENSION_PREFIX,
+  DEFAULT_INCLUDE,
+  DEFAULT_EXCLUDE,
+  CLASS_INPUT_TRIGGER_CHARS,
+  SUPPORTED_STYLE_EXTENSIONS,
+  SUPPORTED_DOCUMENTS
+};

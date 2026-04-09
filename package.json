@@ -1,8 +1,8 @@
 {
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
-  "description": "Index local CSS classes for completion, hover, and definition. 为本地全局样式提供类名补全、悬停和定义跳转。",
-  "version": "0.0.7",
+  "description": "Local CSS IntelliSense for workspace styles: completion, hover, and definition.",
+  "version": "0.0.8",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
