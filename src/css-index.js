@@ -11,6 +11,7 @@ class CssIndex {
     this.entriesByFile = new Map();
     this.watchers = [];
     this.fullRefreshTimer = undefined;
+    this.isRefreshing = false;
   }
 
   getSettings() {
@@ -21,13 +22,14 @@ class CssIndex {
       include: uniqueItems(normalizeArray(config.get("include", DEFAULT_INCLUDE))),
       exclude: uniqueItems([...DEFAULT_EXCLUDE, ...normalizeArray(config.get("exclude", []))]),
       maxFileSizeKB: Number(config.get("maxFileSizeKB", 500)) || 500,
-      maxEntriesPerHover: Number(config.get("maxEntriesPerHover", 5)) || 5
+      maxEntriesPerHover: Number(config.get("maxEntriesPerHover", 5)) || 5,
+      maxIndexedFiles: Number(config.get("maxIndexedFiles", 1200)) || 1200
     };
   }
 
   async initialize() {
-    await this.refreshAll("initial scan");
     this.resetWatchers();
+    await this.refreshAll("initial scan");
   }
 
   dispose() {
@@ -61,12 +63,21 @@ class CssIndex {
   }
 
   async refreshAll(reason) {
-    const files = await this.collectFiles();
-    this.entriesByClass.clear();
-    this.entriesByFile.clear();
+    if (this.isRefreshing) {
+      this.log(`Skipped overlapping refresh for ${reason}.`);
+      return;
+    }
 
-    await Promise.all(files.map((uri) => this.indexFile(uri)));
-    this.log(`Indexed ${files.length} file(s) for ${reason}. Total classes: ${this.entriesByClass.size}.`);
+    this.isRefreshing = true;
+    try {
+      const files = await this.collectFiles();
+      this.entriesByClass.clear();
+      this.entriesByFile.clear();
+      await this.indexFilesInBatches(files);
+      this.log(`Indexed ${files.length} file(s) for ${reason}. Total classes: ${this.entriesByClass.size}.`);
+    } finally {
+      this.isRefreshing = false;
+    }
   }
 
   async collectFiles() {
@@ -91,7 +102,27 @@ class CssIndex {
       }
     }
 
-    return Array.from(fileMap.values());
+    if (settings.enableAutoIndex && fileMap.size < 24) {
+      const beforeFallbackCount = fileMap.size;
+      const fallbackMatches = await vscode.workspace.findFiles("**/*.{css,scss,less}", exclude || undefined);
+      const rankedFallback = fallbackMatches
+        .filter((uri) => shouldIndexStyleUri(uri) && !fileMap.has(uri.toString()))
+        .sort((left, right) => scoreStyleUri(right) - scoreStyleUri(left));
+
+      for (const uri of rankedFallback) {
+        if (fileMap.size >= settings.maxIndexedFiles) {
+          break;
+        }
+        fileMap.set(uri.toString(), uri);
+      }
+
+      if (rankedFallback.length) {
+        this.log(`Fallback scan added ${Math.max(0, fileMap.size - beforeFallbackCount)} candidate style file(s).`);
+      }
+    }
+
+    const rankedFiles = Array.from(fileMap.values()).sort((left, right) => scoreStyleUri(right) - scoreStyleUri(left));
+    return rankedFiles.slice(0, settings.maxIndexedFiles);
   }
 
   resetWatchers() {
@@ -105,6 +136,10 @@ class CssIndex {
       ...expandConfiguredPatternsSync(settings.entryFiles),
       ...(settings.enableAutoIndex ? settings.include : [])
     ]);
+
+    if (settings.enableAutoIndex) {
+      watchPatterns.add("**/*.{css,scss,less}");
+    }
 
     for (const pattern of watchPatterns.size ? watchPatterns : DEFAULT_INCLUDE) {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
@@ -147,6 +182,18 @@ class CssIndex {
     } catch (error) {
       this.removeFile(uri);
       this.log(`Failed to index ${uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async indexFilesInBatches(files) {
+    const batchSize = 16;
+    for (let index = 0; index < files.length; index += batchSize) {
+      const batch = files.slice(index, index + batchSize);
+      await Promise.all(batch.map((uri) => this.indexFile(uri)));
+
+      if (index + batchSize < files.length) {
+        await yieldToEventLoop();
+      }
     }
   }
 
@@ -198,6 +245,67 @@ class CssIndex {
   logError(action, uri, error) {
     this.log(`Watcher ${action} failed for ${uri.fsPath}: ${error instanceof Error ? error.stack : String(error)}`);
   }
+}
+
+function scoreStyleUri(uri) {
+  const normalizedPath = uri.fsPath.replace(/\\/g, "/").toLowerCase();
+  let score = 0;
+
+  const strongPathHints = [
+    "/src/styles/",
+    "/src/style/",
+    "/src/assets/styles/",
+    "/src/assets/style/",
+    "/packages/",
+    "/apps/",
+    "/shared/",
+    "/themes/",
+    "/theme/",
+    "/styles/",
+    "/style/"
+  ];
+
+  const strongNameHints = [
+    "/global.",
+    "/globals.",
+    "/base.",
+    "/common.",
+    "/theme.",
+    "/reset.",
+    "/variables.",
+    "/index.",
+    "/app."
+  ];
+
+  for (const hint of strongPathHints) {
+    if (normalizedPath.includes(hint)) {
+      score += 12;
+    }
+  }
+
+  for (const hint of strongNameHints) {
+    if (normalizedPath.includes(hint)) {
+      score += 20;
+    }
+  }
+
+  if (normalizedPath.includes("/assets/css/") || normalizedPath.includes("/assets/scss/") || normalizedPath.includes("/assets/less/")) {
+    score += 10;
+  }
+
+  if (normalizedPath.endsWith(".scss")) {
+    score += 2;
+  } else if (normalizedPath.endsWith(".less")) {
+    score += 1;
+  }
+
+  return score;
+}
+
+function yieldToEventLoop() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 module.exports = {

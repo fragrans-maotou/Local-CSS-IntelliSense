@@ -52,6 +52,7 @@
 - `localCssIntelliSense.exclude`
 - `localCssIntelliSense.maxFileSizeKB`
 - `localCssIntelliSense.maxEntriesPerHover`
+- `localCssIntelliSense.maxIndexedFiles`
 
 示例：
 
@@ -129,6 +130,7 @@ It helps with three common problems:
 - `localCssIntelliSense.exclude`
 - `localCssIntelliSense.maxFileSizeKB`
 - `localCssIntelliSense.maxEntriesPerHover`
+- `localCssIntelliSense.maxIndexedFiles`
 
 ### Packaging
 

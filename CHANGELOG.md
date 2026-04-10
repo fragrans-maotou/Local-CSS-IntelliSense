@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.9
+
+- 扩大默认自动索引目录，补充 `packages`、`apps`、`shared`、`theme` 等大仓常见样式位置 / Expand the default auto-index paths to cover common monorepo style locations such as `packages`, `apps`, `shared`, and `theme`.
+- 在默认命中较少时增加受控的工作区兜底扫描，降低“大项目里完全扫不到”的概率 / Add a controlled workspace fallback scan when the default matches are too few, reducing the chance of finding nothing in large projects.
+- 将全量索引改为分批处理，改善大型工作区的启动与刷新卡顿 / Batch global indexing work to improve startup and refresh performance in large workspaces.
+- 新增 `maxIndexedFiles` 配置，用于控制大型项目的全局索引规模 / Add `maxIndexedFiles` so large projects can cap global index size for better performance.
+
 ## 0.0.8
 
 - 重构源码结构，将入口、索引、解析、上下文识别、展示逻辑拆分到独立模块中 / Refactor the source tree by splitting entry, indexing, parsing, context detection, and presentation into separate modules.

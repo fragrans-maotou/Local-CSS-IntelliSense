@@ -52,6 +52,7 @@ Common settings:
 - `localCssIntelliSense.exclude`
 - `localCssIntelliSense.maxFileSizeKB`
 - `localCssIntelliSense.maxEntriesPerHover`
+- `localCssIntelliSense.maxIndexedFiles`
 
 Example:
 
