@@ -30,7 +30,7 @@ async function resolveConfiguredPattern(pattern) {
   }
 
   if (hasGlobSyntax(pattern)) {
-    return [normalizeGlobSlashes(pattern)];
+    return [normalizeStyleGlobPattern(pattern)];
   }
 
   const ext = path.extname(pattern).toLowerCase();
@@ -62,7 +62,7 @@ function resolveConfiguredPatternSync(pattern) {
   }
 
   if (hasGlobSyntax(pattern)) {
-    return [normalizeGlobSlashes(pattern)];
+    return [normalizeStyleGlobPattern(pattern)];
   }
 
   const ext = path.extname(pattern).toLowerCase();
@@ -196,6 +196,23 @@ function getWorkspaceCandidateUris(pattern) {
   return (vscode.workspace.workspaceFolders || []).map((folder) => {
     return vscode.Uri.joinPath(folder.uri, normalized);
   });
+}
+
+function normalizeStyleGlobPattern(pattern) {
+  const normalized = normalizeGlobSlashes(pattern);
+  if (/\.(css|scss|less)(?:$|[)}\],])/i.test(normalized)) {
+    return normalized;
+  }
+
+  if (normalized.endsWith("/**")) {
+    return `${normalized}/*.{css,scss,less}`;
+  }
+
+  if (normalized.endsWith("/*")) {
+    return `${normalized}.{css,scss,less}`;
+  }
+
+  return normalized;
 }
 
 module.exports = {

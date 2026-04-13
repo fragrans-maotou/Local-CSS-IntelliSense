@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.10
+
+- 兼容 `src/style/**` 这类目录型 glob 配置，自动转换成只匹配样式文件的 glob / Normalize directory-style glob patterns such as `src/style/**` into style-file-only globs.
+- 将默认单文件大小上限提升到 `2048KB`，减少大型 `index.less` / `global.scss` 被直接跳过的情况 / Raise the default per-file size limit to `2048KB` so large `index.less` and `global.scss` files are less likely to be skipped.
+
 ## 0.0.9
 
 - 扩大默认自动索引目录，补充 `packages`、`apps`、`shared`、`theme` 等大仓常见样式位置 / Expand the default auto-index paths to cover common monorepo style locations such as `packages`, `apps`, `shared`, and `theme`.

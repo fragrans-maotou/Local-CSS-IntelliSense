@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Local CSS IntelliSense for workspace styles: completion, hover, and definition.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -169,7 +169,7 @@
         },
         "localCssIntelliSense.maxFileSizeKB": {
           "type": "number",
-          "default": 500,
+          "default": 2048,
           "minimum": 1,
           "description": "Skip files larger than this size in kilobytes."
         },

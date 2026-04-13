@@ -21,7 +21,7 @@ class CssIndex {
       entryFiles: normalizeArray(config.get("entryFiles", [])),
       include: uniqueItems(normalizeArray(config.get("include", DEFAULT_INCLUDE))),
       exclude: uniqueItems([...DEFAULT_EXCLUDE, ...normalizeArray(config.get("exclude", []))]),
-      maxFileSizeKB: Number(config.get("maxFileSizeKB", 500)) || 500,
+      maxFileSizeKB: Number(config.get("maxFileSizeKB", 2048)) || 2048,
       maxEntriesPerHover: Number(config.get("maxEntriesPerHover", 5)) || 5,
       maxIndexedFiles: Number(config.get("maxIndexedFiles", 1200)) || 1200
     };
