@@ -5,15 +5,22 @@ const { CssIndex } = require("./css-index");
 const { DocumentStyleResolver } = require("./document-style-resolver");
 const { getClassNameAtPosition, getClassValueContext, getCurrentClassToken } = require("./document-context");
 const { buildContextualHoverMarkdown, createCompletionItem } = require("./presentation");
+const { createSourceSelectionStore, createSourceStatusBar } = require("./source-selection");
 const { mergeEntries, removeDuplicateEntries, sortEntriesByPriority } = require("./utils");
 
 function activate(context) {
   const outputChannel = vscode.window.createOutputChannel("Local CSS IntelliSense");
-  const cssIndex = new CssIndex(outputChannel);
+  const sourceStore = createSourceSelectionStore(context);
+  const statusBar = createSourceStatusBar(sourceStore);
+  const cssIndex = new CssIndex(outputChannel, {
+    getSelectedSources: () => sourceStore.getPaths()
+  });
   const styleResolver = new DocumentStyleResolver(outputChannel);
   const suggestController = createSuggestController();
+  const warmupController = createWarmupController(styleResolver);
 
   context.subscriptions.push(outputChannel);
+  context.subscriptions.push(statusBar.item);
   context.subscriptions.push({
     dispose: () => {
       cssIndex.dispose();
@@ -21,9 +28,11 @@ function activate(context) {
     }
   });
 
+  statusBar.update();
   cssIndex.initialize().catch((error) => {
     outputChannel.appendLine(`[Local CSS IntelliSense] Initial indexing failed: ${error instanceof Error ? error.stack : String(error)}`);
   });
+  warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
 
   const completionProvider = vscode.languages.registerCompletionItemProvider(
     SUPPORTED_DOCUMENTS,
@@ -36,7 +45,10 @@ function activate(context) {
 
         const tokenInfo = getCurrentClassToken(document, position, classContext);
         const prefix = tokenInfo.text.toLowerCase();
-        const documentContext = await styleResolver.getContext(document);
+        const documentContext = styleResolver.getCachedContext(document) || EMPTY_CONTEXT;
+        if (documentContext === EMPTY_CONTEXT) {
+          warmupController.schedule(document);
+        }
         const localClasses = Array.from(documentContext.entriesByClass.keys()).sort((left, right) => left.localeCompare(right));
         const globalClasses = cssIndex.getClasses();
         const seen = new Set();
@@ -74,11 +86,19 @@ function activate(context) {
         return undefined;
       }
 
-      const documentContext = await styleResolver.getContext(document);
-      const localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+      let documentContext = styleResolver.getCachedContext(document);
+      if (!documentContext) {
+        warmupController.schedule(document);
+      }
+
+      let localEntries = sortEntriesByPriority((documentContext || EMPTY_CONTEXT).entriesByClass.get(className) || []);
       const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
       if (!localEntries.length && !globalEntries.length) {
-        return undefined;
+        documentContext = await styleResolver.getContext(document);
+        localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+        if (!localEntries.length) {
+          return undefined;
+        }
       }
 
       return new vscode.Hover(buildContextualHoverMarkdown(localEntries, globalEntries, cssIndex.getHoverLimit()));
@@ -92,15 +112,23 @@ function activate(context) {
         return undefined;
       }
 
-      const documentContext = await styleResolver.getContext(document);
-      const localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+      let documentContext = styleResolver.getCachedContext(document);
+      if (!documentContext) {
+        warmupController.schedule(document);
+      }
+
+      let localEntries = sortEntriesByPriority((documentContext || EMPTY_CONTEXT).entriesByClass.get(className) || []);
       const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
       const entries = sortEntriesByPriority([...localEntries, ...globalEntries]);
       if (!entries.length) {
-        return undefined;
+        documentContext = await styleResolver.getContext(document);
+        localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+        if (!localEntries.length) {
+          return undefined;
+        }
       }
 
-      return entries.map((entry) => {
+      return sortEntriesByPriority([...localEntries, ...globalEntries]).map((entry) => {
         const targetUri = vscode.Uri.file(entry.filePath);
         const targetPosition = new vscode.Position(Math.max(0, entry.line - 1), Math.max(0, entry.column - 1));
         return new vscode.Location(targetUri, targetPosition);
@@ -112,7 +140,32 @@ function activate(context) {
     styleResolver.dispose();
     await cssIndex.refreshAll("manual refresh");
     cssIndex.resetWatchers();
+    statusBar.update();
+    warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
     vscode.window.showInformationMessage(`Local CSS IntelliSense indexed ${cssIndex.getClasses().length} global class name(s).`);
+  });
+
+  const selectSourcesCommand = vscode.commands.registerCommand("localCssIntelliSense.selectSources", async () => {
+    const selected = await sourceStore.selectPaths();
+    if (!selected) {
+      return;
+    }
+
+    statusBar.update();
+    styleResolver.dispose();
+    await cssIndex.refreshAll("source selection");
+    cssIndex.resetWatchers();
+    warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
+    vscode.window.showInformationMessage(`Local CSS IntelliSense selected ${selected.length} source path(s).`);
+  });
+
+  const clearSourcesCommand = vscode.commands.registerCommand("localCssIntelliSense.clearSources", async () => {
+    await sourceStore.clearPaths();
+    statusBar.update();
+    styleResolver.dispose();
+    await cssIndex.refreshAll("clear sources");
+    cssIndex.resetWatchers();
+    vscode.window.showInformationMessage("Local CSS IntelliSense cleared custom scan sources.");
   });
 
   const configListener = vscode.workspace.onDidChangeConfiguration((event) => {
@@ -120,6 +173,8 @@ function activate(context) {
       styleResolver.dispose();
       cssIndex.resetWatchers();
       cssIndex.scheduleFullRefresh("configuration change");
+      statusBar.update();
+      warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
     }
   });
 
@@ -147,22 +202,27 @@ function activate(context) {
       return;
     }
 
+    warmupController.schedule(editor.document);
     suggestController.schedule();
+  });
+
+  const openListener = vscode.workspace.onDidOpenTextDocument((document) => {
+    warmupController.schedule(document);
   });
 
   const closeListener = vscode.workspace.onDidCloseTextDocument((document) => {
     styleResolver.invalidateDocument(document.uri);
   });
 
-  const styleWatcher = vscode.workspace.createFileSystemWatcher("**/*.{css,scss,less}");
-  styleWatcher.onDidCreate((uri) => {
-    styleResolver.invalidateStyle(uri);
+  const saveListener = vscode.workspace.onDidSaveTextDocument((document) => {
+    if (SUPPORTED_STYLE_EXTENSIONS.has(path.extname(document.uri.fsPath || "").toLowerCase())) {
+      styleResolver.invalidateStyle(document.uri);
+    }
+    warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
   });
-  styleWatcher.onDidChange((uri) => {
-    styleResolver.invalidateStyle(uri);
-  });
-  styleWatcher.onDidDelete((uri) => {
-    styleResolver.invalidateStyle(uri);
+
+  const activeEditorListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
+    warmupController.schedule(editor ? editor.document : undefined);
   });
 
   context.subscriptions.push(
@@ -170,10 +230,14 @@ function activate(context) {
     hoverProvider,
     definitionProvider,
     refreshCommand,
+    selectSourcesCommand,
+    clearSourcesCommand,
     configListener,
     typingListener,
+    openListener,
     closeListener,
-    styleWatcher
+    saveListener,
+    activeEditorListener,
   );
 }
 
@@ -191,6 +255,44 @@ function createSuggestController() {
     }
   };
 }
+
+function createWarmupController(styleResolver) {
+  let timer = undefined;
+  let latestDocument = undefined;
+
+  return {
+    schedule(document) {
+      if (!isSupportedDocument(document)) {
+        return;
+      }
+
+      latestDocument = document;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const target = latestDocument;
+        latestDocument = undefined;
+        if (target) {
+          styleResolver.primeContext(target);
+        }
+      }, 120);
+    }
+  };
+}
+
+function isSupportedDocument(document) {
+  if (!document) {
+    return false;
+  }
+
+  return SUPPORTED_DOCUMENTS.some((selector) => {
+    return selector.language === document.languageId && selector.scheme === document.uri.scheme;
+  });
+}
+
+const EMPTY_CONTEXT = {
+  entries: [],
+  entriesByClass: new Map()
+};
 
 module.exports = {
   activate,

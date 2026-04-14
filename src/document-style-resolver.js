@@ -7,35 +7,80 @@ class DocumentStyleResolver {
   constructor(outputChannel) {
     this.outputChannel = outputChannel;
     this.documentCache = new Map();
+    this.documentPromises = new Map();
     this.styleFileCache = new Map();
+    this.styleFilePromises = new Map();
   }
 
   dispose() {
     this.documentCache.clear();
+    this.documentPromises.clear();
     this.styleFileCache.clear();
+    this.styleFilePromises.clear();
   }
 
   invalidateDocument(uri) {
     if (!uri) {
       return;
     }
-    this.documentCache.delete(uri.toString());
+    const key = uri.toString();
+    this.documentCache.delete(key);
+    this.documentPromises.delete(key);
   }
 
   invalidateStyle(uri) {
     if (!uri) {
       return;
     }
-    this.styleFileCache.delete(uri.toString());
+    const key = uri.toString();
+    this.styleFileCache.delete(key);
+    this.styleFilePromises.delete(key);
+  }
+
+  getCachedContext(document) {
+    const cached = this.documentCache.get(document.uri.toString());
+    if (cached && cached.version === document.version) {
+      return cached.value;
+    }
+    return undefined;
+  }
+
+  primeContext(document) {
+    return this.getContext(document).catch((error) => {
+      this.outputChannel.appendLine(`[Local CSS IntelliSense] Context warmup failed: ${error instanceof Error ? error.stack : String(error)}`);
+      return undefined;
+    });
   }
 
   async getContext(document) {
     const key = document.uri.toString();
-    const cached = this.documentCache.get(key);
-    if (cached && cached.version === document.version) {
-      return cached.value;
+    const cached = this.getCachedContext(document);
+    if (cached) {
+      return cached;
     }
 
+    const pending = this.documentPromises.get(key);
+    if (pending && pending.version === document.version) {
+      return pending.promise;
+    }
+
+    const promise = this.buildContext(document).finally(() => {
+      const current = this.documentPromises.get(key);
+      if (current && current.version === document.version) {
+        this.documentPromises.delete(key);
+      }
+    });
+
+    this.documentPromises.set(key, {
+      version: document.version,
+      promise
+    });
+
+    return promise;
+  }
+
+  async buildContext(document) {
+    const key = document.uri.toString();
     const inlineResult = extractInlineStyleContext(document);
     const importedUris = await this.resolveDocumentStyleUris(document, inlineResult.dependencies);
     const entries = [...inlineResult.entries];
@@ -128,22 +173,42 @@ class DocumentStyleResolver {
       return cached.value;
     }
 
-    const bytes = await vscode.workspace.fs.readFile(uri);
-    const source = Buffer.from(bytes).toString("utf8");
-    const value = {
-      entries: parseCssEntries(source, uri.fsPath, {
-        sourceKind: "imported"
-      }),
-      dependencies: extractStyleDependencies(source)
-    };
+    const pending = this.styleFilePromises.get(cacheKey);
+    if (pending && pending.mtime === stat.mtime && pending.size === stat.size) {
+      return pending.promise;
+    }
 
-    this.styleFileCache.set(cacheKey, {
-      mtime: stat.mtime,
-      size: stat.size,
-      value
+    const promise = (async () => {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      const source = Buffer.from(bytes).toString("utf8");
+      const value = {
+        entries: parseCssEntries(source, uri.fsPath, {
+          sourceKind: "imported"
+        }),
+        dependencies: extractStyleDependencies(source)
+      };
+
+      this.styleFileCache.set(cacheKey, {
+        mtime: stat.mtime,
+        size: stat.size,
+        value
+      });
+
+      return value;
+    })().finally(() => {
+      const current = this.styleFilePromises.get(cacheKey);
+      if (current && current.mtime === stat.mtime && current.size === stat.size) {
+        this.styleFilePromises.delete(cacheKey);
+      }
     });
 
-    return value;
+    this.styleFilePromises.set(cacheKey, {
+      mtime: stat.mtime,
+      size: stat.size,
+      promise
+    });
+
+    return promise;
   }
 }
 

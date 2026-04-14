@@ -5,8 +5,9 @@ const { expandConfiguredPatterns, expandConfiguredPatternsSync, isWorkspaceFile,
 const { normalizeArray, uniqueItems, toGlobUnion } = require("./utils");
 
 class CssIndex {
-  constructor(outputChannel) {
+  constructor(outputChannel, options = {}) {
     this.outputChannel = outputChannel;
+    this.getSelectedSources = options.getSelectedSources || (() => []);
     this.entriesByClass = new Map();
     this.entriesByFile = new Map();
     this.watchers = [];
@@ -16,9 +17,10 @@ class CssIndex {
 
   getSettings() {
     const config = vscode.workspace.getConfiguration(EXTENSION_PREFIX);
+    const selectedSources = normalizeArray(this.getSelectedSources());
     return {
-      enableAutoIndex: config.get("enableAutoIndex", true),
-      entryFiles: normalizeArray(config.get("entryFiles", [])),
+      enableAutoIndex: config.get("enableAutoIndex", false),
+      entryFiles: uniqueItems([...selectedSources, ...normalizeArray(config.get("entryFiles", []))]),
       include: uniqueItems(normalizeArray(config.get("include", DEFAULT_INCLUDE))),
       exclude: uniqueItems([...DEFAULT_EXCLUDE, ...normalizeArray(config.get("exclude", []))]),
       maxFileSizeKB: Number(config.get("maxFileSizeKB", 2048)) || 2048,
@@ -73,6 +75,12 @@ class CssIndex {
       const files = await this.collectFiles();
       this.entriesByClass.clear();
       this.entriesByFile.clear();
+
+      if (!files.length) {
+        this.log("No global CSS sources selected. Use the status bar button or the command palette to choose CSS files or folders.");
+        return;
+      }
+
       await this.indexFilesInBatches(files);
       this.log(`Indexed ${files.length} file(s) for ${reason}. Total classes: ${this.entriesByClass.size}.`);
     } finally {

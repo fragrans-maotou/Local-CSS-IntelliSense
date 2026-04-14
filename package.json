@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Local CSS IntelliSense for workspace styles: completion, hover, and definition.",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -30,6 +30,8 @@
   ],
   "activationEvents": [
     "onCommand:localCssIntelliSense.refreshIndex",
+    "onCommand:localCssIntelliSense.selectSources",
+    "onCommand:localCssIntelliSense.clearSources",
     "onLanguage:html",
     "onLanguage:vue",
     "onLanguage:javascriptreact",
@@ -49,6 +51,14 @@
       {
         "command": "localCssIntelliSense.refreshIndex",
         "title": "Local CSS IntelliSense: Refresh Index"
+      },
+      {
+        "command": "localCssIntelliSense.selectSources",
+        "title": "Local CSS IntelliSense: Select CSS Sources"
+      },
+      {
+        "command": "localCssIntelliSense.clearSources",
+        "title": "Local CSS IntelliSense: Clear CSS Sources"
       }
     ],
     "configuration": {
@@ -56,8 +66,8 @@
       "properties": {
         "localCssIntelliSense.enableAutoIndex": {
           "type": "boolean",
-          "default": true,
-          "description": "Automatically scan likely global style files and folders in the workspace."
+          "default": false,
+          "description": "Automatically scan the built-in default style locations. Disabled by default so you can choose sources manually."
         },
         "localCssIntelliSense.entryFiles": {
           "type": "array",

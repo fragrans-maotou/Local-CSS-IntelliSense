@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.12
+
+- 新增状态栏入口和命令，允许用户手动选择需要扫描的 CSS 文件或文件夹 / Add a status-bar entry and commands so users can manually choose which CSS files or folders should be scanned.
+- 默认关闭自动扫描，改为“用户明确选择源”优先 / Disable automatic scanning by default and prioritize explicit user-selected sources.
+- 仅持久化用户选择的扫描源，不持久化完整索引数据，避免样式变更后读到旧缓存 / Persist only the selected scan sources instead of persisting the full CSS index, so style changes do not leave stale data behind.
+- 为当前文档样式解析增加预热和并发去重，减少 hover 一直 loading 的情况 / Add warmup and in-flight deduplication for current-document style resolution to reduce long hover loading states.
+
 ## 0.0.11
 
 - 收紧默认自动索引目录，只保留更明确的全局样式位置，避免大型项目里扫描过宽 / Tighten the default auto-index locations so large projects only scan more explicit global-style paths.
