@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.11
+
+- 收紧默认自动索引目录，只保留更明确的全局样式位置，避免大型项目里扫描过宽 / Tighten the default auto-index locations so large projects only scan more explicit global-style paths.
+- 移除工作区兜底扫描和过宽的全量 watcher，降低卡顿与无关搜索 / Remove the workspace fallback scan and broad full-workspace watcher to reduce lag and irrelevant searching.
+- 为全局入口文件补上 `@import` / `@use` / `@forward` 依赖递归索引，让 `src/style/index.less` 这类入口文件能带出它依赖的样式 / Recursively index `@import`, `@use`, and `@forward` dependencies for global entry files so entry files such as `src/style/index.less` can bring in their dependent styles.
+- 将默认 `maxIndexedFiles` 从 `1200` 降到 `400`，让大项目的初始加载更轻量 / Lower the default `maxIndexedFiles` from `1200` to `400` for lighter startup behavior in large workspaces.
+
 ## 0.0.10
 
 - 兼容 `src/style/**` 这类目录型 glob 配置，自动转换成只匹配样式文件的 glob / Normalize directory-style glob patterns such as `src/style/**` into style-file-only globs.

@@ -54,6 +54,8 @@ Common settings:
 - `localCssIntelliSense.maxEntriesPerHover`
 - `localCssIntelliSense.maxIndexedFiles`
 
+`maxIndexedFiles` defaults to `400`, which is more suitable for lightweight indexing in large workspaces.
+
 Example:
 
 ```json

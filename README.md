@@ -54,6 +54,8 @@
 - `localCssIntelliSense.maxEntriesPerHover`
 - `localCssIntelliSense.maxIndexedFiles`
 
+`maxIndexedFiles` 默认是 `400`，更适合大项目的轻量索引。
+
 示例：
 
 ```json

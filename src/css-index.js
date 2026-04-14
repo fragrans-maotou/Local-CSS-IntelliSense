@@ -1,7 +1,7 @@
 const vscode = require("vscode");
 const { EXTENSION_PREFIX, DEFAULT_INCLUDE, DEFAULT_EXCLUDE } = require("./constants");
-const { parseCssEntries } = require("./parsing");
-const { expandConfiguredPatterns, expandConfiguredPatternsSync, isWorkspaceFile, shouldIndexStyleUri } = require("./path-utils");
+const { extractStyleDependencies, parseCssEntries } = require("./parsing");
+const { expandConfiguredPatterns, expandConfiguredPatternsSync, isWorkspaceFile, resolveStyleSpec, shouldIndexStyleUri } = require("./path-utils");
 const { normalizeArray, uniqueItems, toGlobUnion } = require("./utils");
 
 class CssIndex {
@@ -23,7 +23,7 @@ class CssIndex {
       exclude: uniqueItems([...DEFAULT_EXCLUDE, ...normalizeArray(config.get("exclude", []))]),
       maxFileSizeKB: Number(config.get("maxFileSizeKB", 2048)) || 2048,
       maxEntriesPerHover: Number(config.get("maxEntriesPerHover", 5)) || 5,
-      maxIndexedFiles: Number(config.get("maxIndexedFiles", 1200)) || 1200
+      maxIndexedFiles: Number(config.get("maxIndexedFiles", 400)) || 400
     };
   }
 
@@ -102,25 +102,6 @@ class CssIndex {
       }
     }
 
-    if (settings.enableAutoIndex && fileMap.size < 24) {
-      const beforeFallbackCount = fileMap.size;
-      const fallbackMatches = await vscode.workspace.findFiles("**/*.{css,scss,less}", exclude || undefined);
-      const rankedFallback = fallbackMatches
-        .filter((uri) => shouldIndexStyleUri(uri) && !fileMap.has(uri.toString()))
-        .sort((left, right) => scoreStyleUri(right) - scoreStyleUri(left));
-
-      for (const uri of rankedFallback) {
-        if (fileMap.size >= settings.maxIndexedFiles) {
-          break;
-        }
-        fileMap.set(uri.toString(), uri);
-      }
-
-      if (rankedFallback.length) {
-        this.log(`Fallback scan added ${Math.max(0, fileMap.size - beforeFallbackCount)} candidate style file(s).`);
-      }
-    }
-
     const rankedFiles = Array.from(fileMap.values()).sort((left, right) => scoreStyleUri(right) - scoreStyleUri(left));
     return rankedFiles.slice(0, settings.maxIndexedFiles);
   }
@@ -137,10 +118,6 @@ class CssIndex {
       ...(settings.enableAutoIndex ? settings.include : [])
     ]);
 
-    if (settings.enableAutoIndex) {
-      watchPatterns.add("**/*.{css,scss,less}");
-    }
-
     for (const pattern of watchPatterns.size ? watchPatterns : DEFAULT_INCLUDE) {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       watcher.onDidCreate((uri) => {
@@ -156,11 +133,17 @@ class CssIndex {
     }
   }
 
-  async indexFile(uri) {
+  async indexFile(uri, visited = new Set()) {
     if (!isWorkspaceFile(uri) || !shouldIndexStyleUri(uri)) {
       this.removeFile(uri);
       return;
     }
+
+    const visitKey = uri.toString();
+    if (visited.has(visitKey)) {
+      return;
+    }
+    visited.add(visitKey);
 
     const settings = this.getSettings();
     const fileSizeLimitBytes = settings.maxFileSizeKB * 1024;
@@ -179,6 +162,15 @@ class CssIndex {
         sourceKind: "global"
       });
       this.replaceFileEntries(uri, parsedEntries);
+
+      const dependencies = extractStyleDependencies(source);
+      for (const dependency of dependencies) {
+        const resolvedDependency = await resolveStyleSpec(dependency, uri);
+        if (!resolvedDependency) {
+          continue;
+        }
+        await this.indexFile(resolvedDependency, visited);
+      }
     } catch (error) {
       this.removeFile(uri);
       this.log(`Failed to index ${uri.fsPath}: ${error instanceof Error ? error.message : String(error)}`);
@@ -256,11 +248,6 @@ function scoreStyleUri(uri) {
     "/src/style/",
     "/src/assets/styles/",
     "/src/assets/style/",
-    "/packages/",
-    "/apps/",
-    "/shared/",
-    "/themes/",
-    "/theme/",
     "/styles/",
     "/style/"
   ];
@@ -287,10 +274,6 @@ function scoreStyleUri(uri) {
     if (normalizedPath.includes(hint)) {
       score += 20;
     }
-  }
-
-  if (normalizedPath.includes("/assets/css/") || normalizedPath.includes("/assets/scss/") || normalizedPath.includes("/assets/less/")) {
-    score += 10;
   }
 
   if (normalizedPath.endsWith(".scss")) {
