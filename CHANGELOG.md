@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.13
+
+- 改进 hover 和跳转的匹配相关性，优先展示和当前元素真正相关的选择器，避免像 `.PrintPreview_div .fl` 这类无关上下文在存在直接 `.fl` 规则时混进结果里 / Improve hover and definition relevance so selectors that truly match the current element are shown first, avoiding unrelated contextual rules such as `.PrintPreview_div .fl` when a direct `.fl` rule exists.
+- 左下角 `Local CSS` 状态栏支持扫描进度、扫描完成状态、索引文件数和类名数提示 / Add scan progress, completion state, indexed-file count, and class-count feedback to the `Local CSS` status bar item.
+- 点击左下角 `Local CSS` 后可打开一个轻量管理弹窗，支持选择扫描源、刷新索引、查看已扫描文件和清空扫描源 / Turn the `Local CSS` status bar entry into a lightweight management popup for selecting sources, refreshing the index, viewing indexed files, and clearing sources.
+
 ## 0.0.12
 
 - 新增状态栏入口和命令，允许用户手动选择需要扫描的 CSS 文件或文件夹 / Add a status-bar entry and commands so users can manually choose which CSS files or folders should be scanned.

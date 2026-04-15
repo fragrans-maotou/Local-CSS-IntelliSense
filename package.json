@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Local CSS IntelliSense for workspace styles: completion, hover, and definition.",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -32,6 +32,7 @@
     "onCommand:localCssIntelliSense.refreshIndex",
     "onCommand:localCssIntelliSense.selectSources",
     "onCommand:localCssIntelliSense.clearSources",
+    "onCommand:localCssIntelliSense.manageSources",
     "onLanguage:html",
     "onLanguage:vue",
     "onLanguage:javascriptreact",
@@ -59,6 +60,10 @@
       {
         "command": "localCssIntelliSense.clearSources",
         "title": "Local CSS IntelliSense: Clear CSS Sources"
+      },
+      {
+        "command": "localCssIntelliSense.manageSources",
+        "title": "Local CSS IntelliSense: Manage CSS Sources"
       }
     ],
     "configuration": {

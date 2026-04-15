@@ -8,6 +8,7 @@ class CssIndex {
   constructor(outputChannel, options = {}) {
     this.outputChannel = outputChannel;
     this.getSelectedSources = options.getSelectedSources || (() => []);
+    this.onStatusChange = options.onStatusChange || (() => {});
     this.entriesByClass = new Map();
     this.entriesByFile = new Map();
     this.watchers = [];
@@ -55,6 +56,24 @@ class CssIndex {
     return this.getSettings().maxEntriesPerHover;
   }
 
+  getIndexedFileSummaries() {
+    return Array.from(this.entriesByFile.values())
+      .map((entries) => {
+        const filePath = entries[0] ? entries[0].filePath : undefined;
+        if (!filePath) {
+          return undefined;
+        }
+
+        return {
+          filePath,
+          ruleCount: entries.length,
+          classCount: new Set(entries.map((entry) => entry.className)).size
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.filePath.localeCompare(right.filePath));
+  }
+
   scheduleFullRefresh(reason) {
     clearTimeout(this.fullRefreshTimer);
     this.fullRefreshTimer = setTimeout(() => {
@@ -72,24 +91,70 @@ class CssIndex {
 
     this.isRefreshing = true;
     try {
-      const files = await this.collectFiles();
+      const settings = this.getSettings();
+      this.emitStatus({
+        state: "scanning",
+        reason,
+        sourceCount: settings.entryFiles.length,
+        scannedFiles: 0,
+        totalFiles: 0,
+        fileCount: this.entriesByFile.size,
+        classCount: this.entriesByClass.size
+      });
+
+      const files = await this.collectFiles(settings);
+      this.emitStatus({
+        state: "scanning",
+        reason,
+        sourceCount: settings.entryFiles.length,
+        scannedFiles: 0,
+        totalFiles: files.length,
+        fileCount: this.entriesByFile.size,
+        classCount: this.entriesByClass.size
+      });
       this.entriesByClass.clear();
       this.entriesByFile.clear();
 
       if (!files.length) {
         this.log("No global CSS sources selected. Use the status bar button or the command palette to choose CSS files or folders.");
+        this.emitStatus({
+          state: "empty",
+          reason,
+          sourceCount: settings.entryFiles.length,
+          fileCount: 0,
+          classCount: 0,
+          message: "No CSS files matched the selected sources yet."
+        });
         return;
       }
 
-      await this.indexFilesInBatches(files);
+      await this.indexFilesInBatches(files, settings);
       this.log(`Indexed ${files.length} file(s) for ${reason}. Total classes: ${this.entriesByClass.size}.`);
+      this.emitStatus({
+        state: "ready",
+        reason,
+        sourceCount: settings.entryFiles.length,
+        fileCount: this.entriesByFile.size,
+        classCount: this.entriesByClass.size,
+        totalFiles: files.length,
+        scannedFiles: files.length
+      });
+    } catch (error) {
+      this.emitStatus({
+        state: "error",
+        reason,
+        sourceCount: this.getSettings().entryFiles.length,
+        fileCount: this.entriesByFile.size,
+        classCount: this.entriesByClass.size,
+        message: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
     } finally {
       this.isRefreshing = false;
     }
   }
 
-  async collectFiles() {
-    const settings = this.getSettings();
+  async collectFiles(settings = this.getSettings()) {
     const globs = new Set(await expandConfiguredPatterns(settings.entryFiles));
 
     if (settings.enableAutoIndex) {
@@ -126,7 +191,11 @@ class CssIndex {
       ...(settings.enableAutoIndex ? settings.include : [])
     ]);
 
-    for (const pattern of watchPatterns.size ? watchPatterns : DEFAULT_INCLUDE) {
+    if (!watchPatterns.size) {
+      return;
+    }
+
+    for (const pattern of watchPatterns) {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       watcher.onDidCreate((uri) => {
         this.indexFile(uri).catch((error) => this.logError("create", uri, error));
@@ -185,11 +254,19 @@ class CssIndex {
     }
   }
 
-  async indexFilesInBatches(files) {
+  async indexFilesInBatches(files, settings = this.getSettings()) {
     const batchSize = 16;
     for (let index = 0; index < files.length; index += batchSize) {
       const batch = files.slice(index, index + batchSize);
       await Promise.all(batch.map((uri) => this.indexFile(uri)));
+      this.emitStatus({
+        state: "scanning",
+        sourceCount: settings.entryFiles.length,
+        scannedFiles: Math.min(index + batch.length, files.length),
+        totalFiles: files.length,
+        fileCount: this.entriesByFile.size,
+        classCount: this.entriesByClass.size
+      });
 
       if (index + batchSize < files.length) {
         await yieldToEventLoop();
@@ -244,6 +321,10 @@ class CssIndex {
 
   logError(action, uri, error) {
     this.log(`Watcher ${action} failed for ${uri.fsPath}: ${error instanceof Error ? error.stack : String(error)}`);
+  }
+
+  emitStatus(status) {
+    this.onStatusChange(status);
   }
 }
 

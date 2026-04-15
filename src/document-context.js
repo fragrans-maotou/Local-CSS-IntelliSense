@@ -65,6 +65,19 @@ function getClassValueContext(document, position) {
   };
 }
 
+function getClassNamesInContext(document, classContext) {
+  if (!classContext) {
+    return [];
+  }
+
+  const source = document.getText();
+  const value = source.slice(classContext.valueStartOffset, classContext.valueEndOffset);
+  return value
+    .split(/\s+/)
+    .map((token) => normalizeClassName(token))
+    .filter((token) => /^[A-Za-z0-9_-]+$/.test(token));
+}
+
 function getClassTokenOffsetRange(source, offset, classContext) {
   let start = offset;
   let end = offset;
@@ -138,5 +151,6 @@ function normalizeClassName(token) {
 module.exports = {
   getClassNameAtPosition,
   getCurrentClassToken,
-  getClassValueContext
+  getClassValueContext,
+  getClassNamesInContext
 };

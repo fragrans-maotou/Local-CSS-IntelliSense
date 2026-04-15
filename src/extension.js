@@ -3,9 +3,10 @@ const vscode = require("vscode");
 const { CLASS_INPUT_TRIGGER_CHARS, EXTENSION_PREFIX, SUPPORTED_DOCUMENTS, SUPPORTED_STYLE_EXTENSIONS } = require("./constants");
 const { CssIndex } = require("./css-index");
 const { DocumentStyleResolver } = require("./document-style-resolver");
-const { getClassNameAtPosition, getClassValueContext, getCurrentClassToken } = require("./document-context");
+const { getClassNameAtPosition, getClassNamesInContext, getClassValueContext, getCurrentClassToken } = require("./document-context");
 const { buildContextualHoverMarkdown, createCompletionItem } = require("./presentation");
-const { createSourceSelectionStore, createSourceStatusBar } = require("./source-selection");
+const { createSourceSelectionStore, createSourceStatusBar, showSourceManager } = require("./source-selection");
+const { filterEntriesForElement } = require("./selector-relevance");
 const { mergeEntries, removeDuplicateEntries, sortEntriesByPriority } = require("./utils");
 
 function activate(context) {
@@ -13,7 +14,10 @@ function activate(context) {
   const sourceStore = createSourceSelectionStore(context);
   const statusBar = createSourceStatusBar(sourceStore);
   const cssIndex = new CssIndex(outputChannel, {
-    getSelectedSources: () => sourceStore.getPaths()
+    getSelectedSources: () => sourceStore.getPaths(),
+    onStatusChange: (status) => {
+      statusBar.setScanStatus(status);
+    }
   });
   const styleResolver = new DocumentStyleResolver(outputChannel);
   const suggestController = createSuggestController();
@@ -85,6 +89,7 @@ function activate(context) {
       if (!className) {
         return undefined;
       }
+      const currentClassNames = getCurrentElementClassNames(document, position);
 
       let documentContext = styleResolver.getCachedContext(document);
       if (!documentContext) {
@@ -92,14 +97,19 @@ function activate(context) {
       }
 
       let localEntries = sortEntriesByPriority((documentContext || EMPTY_CONTEXT).entriesByClass.get(className) || []);
-      const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
+      let globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
       if (!localEntries.length && !globalEntries.length) {
         documentContext = await styleResolver.getContext(document);
         localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
         if (!localEntries.length) {
           return undefined;
         }
+        globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
       }
+
+      const relevantEntries = filterEntriesForElement(className, [...localEntries, ...globalEntries], currentClassNames);
+      localEntries = relevantEntries.filter((entry) => (entry.sourceKind || "global") !== "global");
+      globalEntries = relevantEntries.filter((entry) => (entry.sourceKind || "global") === "global");
 
       return new vscode.Hover(buildContextualHoverMarkdown(localEntries, globalEntries, cssIndex.getHoverLimit()));
     }
@@ -111,6 +121,7 @@ function activate(context) {
       if (!className) {
         return undefined;
       }
+      const currentClassNames = getCurrentElementClassNames(document, position);
 
       let documentContext = styleResolver.getCachedContext(document);
       if (!documentContext) {
@@ -118,17 +129,19 @@ function activate(context) {
       }
 
       let localEntries = sortEntriesByPriority((documentContext || EMPTY_CONTEXT).entriesByClass.get(className) || []);
-      const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
-      const entries = sortEntriesByPriority([...localEntries, ...globalEntries]);
+      let globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
+      let entries = filterEntriesForElement(className, sortEntriesByPriority([...localEntries, ...globalEntries]), currentClassNames);
       if (!entries.length) {
         documentContext = await styleResolver.getContext(document);
         localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
         if (!localEntries.length) {
           return undefined;
         }
+        globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
+        entries = filterEntriesForElement(className, sortEntriesByPriority([...localEntries, ...globalEntries]), currentClassNames);
       }
 
-      return sortEntriesByPriority([...localEntries, ...globalEntries]).map((entry) => {
+      return entries.map((entry) => {
         const targetUri = vscode.Uri.file(entry.filePath);
         const targetPosition = new vscode.Position(Math.max(0, entry.line - 1), Math.max(0, entry.column - 1));
         return new vscode.Location(targetUri, targetPosition);
@@ -136,13 +149,19 @@ function activate(context) {
     }
   });
 
-  const refreshCommand = vscode.commands.registerCommand("localCssIntelliSense.refreshIndex", async () => {
+  const refreshIndex = async (reason, successMessage) => {
     styleResolver.dispose();
-    await cssIndex.refreshAll("manual refresh");
+    await cssIndex.refreshAll(reason);
     cssIndex.resetWatchers();
     statusBar.update();
     warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
-    vscode.window.showInformationMessage(`Local CSS IntelliSense indexed ${cssIndex.getClasses().length} global class name(s).`);
+    if (successMessage) {
+      vscode.window.showInformationMessage(successMessage);
+    }
+  };
+
+  const refreshCommand = vscode.commands.registerCommand("localCssIntelliSense.refreshIndex", async () => {
+    await refreshIndex("manual refresh", `Local CSS IntelliSense indexed ${cssIndex.getClasses().length} global class name(s).`);
   });
 
   const selectSourcesCommand = vscode.commands.registerCommand("localCssIntelliSense.selectSources", async () => {
@@ -152,20 +171,24 @@ function activate(context) {
     }
 
     statusBar.update();
-    styleResolver.dispose();
-    await cssIndex.refreshAll("source selection");
-    cssIndex.resetWatchers();
-    warmupController.schedule(vscode.window.activeTextEditor ? vscode.window.activeTextEditor.document : undefined);
-    vscode.window.showInformationMessage(`Local CSS IntelliSense selected ${selected.length} source path(s).`);
+    await refreshIndex("source selection", `Local CSS IntelliSense selected ${selected.length} source path(s).`);
   });
 
   const clearSourcesCommand = vscode.commands.registerCommand("localCssIntelliSense.clearSources", async () => {
     await sourceStore.clearPaths();
     statusBar.update();
-    styleResolver.dispose();
-    await cssIndex.refreshAll("clear sources");
-    cssIndex.resetWatchers();
-    vscode.window.showInformationMessage("Local CSS IntelliSense cleared custom scan sources.");
+    await refreshIndex("clear sources", "Local CSS IntelliSense cleared custom scan sources.");
+  });
+
+  const manageSourcesCommand = vscode.commands.registerCommand("localCssIntelliSense.manageSources", async () => {
+    await showSourceManager({
+      sourceStore,
+      statusBar,
+      cssIndex,
+      onSelectSources: () => vscode.commands.executeCommand("localCssIntelliSense.selectSources"),
+      onRefreshIndex: () => vscode.commands.executeCommand("localCssIntelliSense.refreshIndex"),
+      onClearSources: () => vscode.commands.executeCommand("localCssIntelliSense.clearSources")
+    });
   });
 
   const configListener = vscode.workspace.onDidChangeConfiguration((event) => {
@@ -232,6 +255,7 @@ function activate(context) {
     refreshCommand,
     selectSourcesCommand,
     clearSourcesCommand,
+    manageSourcesCommand,
     configListener,
     typingListener,
     openListener,
@@ -287,6 +311,11 @@ function isSupportedDocument(document) {
   return SUPPORTED_DOCUMENTS.some((selector) => {
     return selector.language === document.languageId && selector.scheme === document.uri.scheme;
   });
+}
+
+function getCurrentElementClassNames(document, position) {
+  const classContext = getClassValueContext(document, position);
+  return getClassNamesInContext(document, classContext);
 }
 
 const EMPTY_CONTEXT = {
