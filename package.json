@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Local CSS IntelliSense for workspace styles: completion, hover, and definition.",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -177,7 +177,7 @@
     }
   },
   "scripts": {
-    "package": "npx @vscode/vsce package",
+    "package": "node scripts/package-vsix.js",
     "lint": "node -e \"console.log('No linter configured')\"",
     "test": "node -e \"console.log('No automated tests configured yet')\""
   },

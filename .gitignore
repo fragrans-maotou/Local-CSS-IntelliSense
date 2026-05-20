@@ -2,5 +2,6 @@ node_modules
 *.vsix
 *.zip
 .vsix-build/
+.packaging-temp/
 .tmp-dynamic-parse-test*/
 .DS_Store

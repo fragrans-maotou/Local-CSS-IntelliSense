@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.15
+
+- 调整样式去重签名，避免同一条规则因为 source map 列号差异而在 hover 中重复显示两次 / Adjust the style-entry dedupe signature so the same rule is not shown twice in hover when source-map column offsets differ.
+- 将本地打包流程整理为单一正式产物，`npm run package` 现在只生成一个当前版本的 `.vsix` 文件 / Simplify local packaging into a single official artifact so `npm run package` now generates only one `.vsix` for the current version.
+- `dynamic / full / slim` 这类名称只属于之前的临时调试产物，不再是正常发布流程的一部分 / Treat `dynamic / full / slim` names as old debugging artifacts rather than part of the normal release flow.
+
 ## 0.0.14
 
 - 支持通过 Sass 和 Less 编译链解析常见的动态样式生成场景，例如 `@each`、`@use`、`@include`、Less `each()` 与插值选择器，让动态生成的类名也能被索引出来 / Add Sass and Less compilation-based parsing for common dynamic style-generation patterns such as `@each`, `@use`, `@include`, Less `each()`, and interpolated selectors so generated class names can be indexed.

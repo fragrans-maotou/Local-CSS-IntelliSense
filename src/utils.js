@@ -53,7 +53,8 @@ function dedupeEntries(entries) {
 }
 
 function getEntrySignature(entry) {
-  return `${entry.filePath}|${entry.line}|${entry.column}|${entry.selector}`;
+  const declarations = (entry.declarations || "").replace(/\s+/g, " ").trim();
+  return `${entry.filePath}|${entry.line}|${entry.selector}|${declarations}`;
 }
 
 function splitEntriesBySource(entries) {

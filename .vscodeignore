@@ -2,5 +2,9 @@
 .vscode/**
 README.dev.md
 CHANGELOG.md
+scripts/**
 .tmp-dynamic-parse-test*/**
+.vsix-build/**
+.packaging-temp/**
+*.zip
 !node_modules/**
