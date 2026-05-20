@@ -35,15 +35,17 @@ function removeDuplicateEntries(entries, duplicates) {
 }
 
 function dedupeEntries(entries) {
-  const seen = new Set();
+  const indexesBySignature = new Map();
   const result = [];
 
   for (const entry of entries) {
     const signature = getEntrySignature(entry);
-    if (seen.has(signature)) {
+    const existingIndex = indexesBySignature.get(signature);
+    if (existingIndex !== undefined) {
+      result[existingIndex] = entry;
       continue;
     }
-    seen.add(signature);
+    indexesBySignature.set(signature, result.length);
     result.push(entry);
   }
 

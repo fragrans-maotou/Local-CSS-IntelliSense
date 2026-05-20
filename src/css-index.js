@@ -2,7 +2,7 @@ const vscode = require("vscode");
 const { EXTENSION_PREFIX, DEFAULT_INCLUDE, DEFAULT_EXCLUDE } = require("./constants");
 const { extractStyleDependencies, parseCssEntries } = require("./parsing");
 const { expandConfiguredPatterns, expandConfiguredPatternsSync, isWorkspaceFile, resolveStyleSpec, shouldIndexStyleUri } = require("./path-utils");
-const { normalizeArray, uniqueItems, toGlobUnion } = require("./utils");
+const { dedupeEntries, normalizeArray, uniqueItems, toGlobUnion } = require("./utils");
 
 class CssIndex {
   constructor(outputChannel, options = {}) {
@@ -49,7 +49,7 @@ class CssIndex {
   }
 
   getEntries(className) {
-    return this.entriesByClass.get(className) || [];
+    return dedupeEntries(this.entriesByClass.get(className) || []);
   }
 
   getHoverLimit() {
@@ -57,15 +57,14 @@ class CssIndex {
   }
 
   getIndexedFileSummaries() {
-    return Array.from(this.entriesByFile.values())
-      .map((entries) => {
-        const filePath = entries[0] ? entries[0].filePath : undefined;
-        if (!filePath) {
+    return Array.from(this.entriesByFile.entries())
+      .map(([uriKey, entries]) => {
+        if (!entries.length) {
           return undefined;
         }
 
         return {
-          filePath,
+          filePath: vscode.Uri.parse(uriKey).fsPath,
           ruleCount: entries.length,
           classCount: new Set(entries.map((entry) => entry.className)).size
         };
@@ -235,10 +234,10 @@ class CssIndex {
 
       const bytes = await vscode.workspace.fs.readFile(uri);
       const source = Buffer.from(bytes).toString("utf8");
-      const parsedEntries = parseCssEntries(source, uri.fsPath, {
+      const parsedEntries = await parseCssEntries(source, uri.fsPath, {
         sourceKind: "global"
       });
-      this.replaceFileEntries(uri, parsedEntries);
+      this.replaceFileEntries(uri, dedupeEntries(parsedEntries));
 
       const dependencies = extractStyleDependencies(source);
       for (const dependency of dependencies) {

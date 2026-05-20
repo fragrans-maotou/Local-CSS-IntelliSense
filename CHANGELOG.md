@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.14
+
+- 支持通过 Sass 和 Less 编译链解析常见的动态样式生成场景，例如 `@each`、`@use`、`@include`、Less `each()` 与插值选择器，让动态生成的类名也能被索引出来 / Add Sass and Less compilation-based parsing for common dynamic style-generation patterns such as `@each`, `@use`, `@include`, Less `each()`, and interpolated selectors so generated class names can be indexed.
+- 编译后的规则会尽量通过 source map 映射回原始 `scss / less` 文件，保留 hover 与跳转定位体验 / Map compiled rules back to the original `scss / less` sources through source maps when possible, preserving hover and go-to-definition behavior.
+- 对编译结果与递归依赖结果增加去重，避免同一条样式在索引和悬停中重复出现 / Deduplicate compiled and recursively discovered style entries to avoid repeated matches in indexing and hover results.
+
 ## 0.0.13
 
 - 改进 hover 和跳转的匹配相关性，优先展示和当前元素真正相关的选择器，避免像 `.PrintPreview_div .fl` 这类无关上下文在存在直接 `.fl` 规则时混进结果里 / Improve hover and definition relevance so selectors that truly match the current element are shown first, avoiding unrelated contextual rules such as `.PrintPreview_div .fl` when a direct `.fl` rule exists.

@@ -1,7 +1,7 @@
 const vscode = require("vscode");
 const { extractInlineStyleContext, extractStyleDependencies, collectRegexMatches, parseCssEntries } = require("./parsing");
 const { resolveStyleSpec, shouldIndexStyleUri } = require("./path-utils");
-const { groupEntriesByClass, uniqueItems, uniqueUris } = require("./utils");
+const { dedupeEntries, groupEntriesByClass, uniqueItems, uniqueUris } = require("./utils");
 
 class DocumentStyleResolver {
   constructor(outputChannel) {
@@ -81,7 +81,7 @@ class DocumentStyleResolver {
 
   async buildContext(document) {
     const key = document.uri.toString();
-    const inlineResult = extractInlineStyleContext(document);
+    const inlineResult = await extractInlineStyleContext(document);
     const importedUris = await this.resolveDocumentStyleUris(document, inlineResult.dependencies);
     const entries = [...inlineResult.entries];
     const visited = new Set();
@@ -93,9 +93,10 @@ class DocumentStyleResolver {
       }
     }
 
+    const uniqueEntries = dedupeEntries(entries);
     const value = {
-      entries,
-      entriesByClass: groupEntriesByClass(entries)
+      entries: uniqueEntries,
+      entriesByClass: groupEntriesByClass(uniqueEntries)
     };
 
     this.documentCache.set(key, {
@@ -181,10 +182,11 @@ class DocumentStyleResolver {
     const promise = (async () => {
       const bytes = await vscode.workspace.fs.readFile(uri);
       const source = Buffer.from(bytes).toString("utf8");
+      const parsedEntries = await parseCssEntries(source, uri.fsPath, {
+        sourceKind: "imported"
+      });
       const value = {
-        entries: parseCssEntries(source, uri.fsPath, {
-          sourceKind: "imported"
-        }),
+        entries: dedupeEntries(parsedEntries),
         dependencies: extractStyleDependencies(source)
       };
 

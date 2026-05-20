@@ -2,3 +2,5 @@
 .vscode/**
 README.dev.md
 CHANGELOG.md
+.tmp-dynamic-parse-test*/**
+!node_modules/**
