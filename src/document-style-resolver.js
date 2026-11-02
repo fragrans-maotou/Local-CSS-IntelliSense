@@ -35,6 +35,10 @@ class DocumentStyleResolver {
     const key = uri.toString();
     this.styleFileCache.delete(key);
     this.styleFilePromises.delete(key);
+    // Imported style changes must also drop document contexts that may have
+    // merged the previous file contents, even when the document itself is unchanged.
+    this.documentCache.clear();
+    this.documentPromises.clear();
   }
 
   getCachedContext(document) {

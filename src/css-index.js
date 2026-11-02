@@ -9,11 +9,14 @@ class CssIndex {
     this.outputChannel = outputChannel;
     this.getSelectedSources = options.getSelectedSources || (() => []);
     this.onStatusChange = options.onStatusChange || (() => {});
+    this.onStyleFileChanged = options.onStyleFileChanged || (() => {});
     this.entriesByClass = new Map();
     this.entriesByFile = new Map();
+    this.sortedClassesCache = null;
     this.watchers = [];
     this.fullRefreshTimer = undefined;
     this.isRefreshing = false;
+    this.pendingRefreshReason = undefined;
   }
 
   getSettings() {
@@ -38,6 +41,7 @@ class CssIndex {
   dispose() {
     clearTimeout(this.fullRefreshTimer);
     this.fullRefreshTimer = undefined;
+    this.pendingRefreshReason = undefined;
     for (const watcher of this.watchers) {
       watcher.dispose();
     }
@@ -45,7 +49,10 @@ class CssIndex {
   }
 
   getClasses() {
-    return Array.from(this.entriesByClass.keys()).sort((left, right) => left.localeCompare(right));
+    if (!this.sortedClassesCache) {
+      this.sortedClassesCache = Array.from(this.entriesByClass.keys()).sort((left, right) => left.localeCompare(right));
+    }
+    return this.sortedClassesCache;
   }
 
   getEntries(className) {
@@ -84,11 +91,14 @@ class CssIndex {
 
   async refreshAll(reason) {
     if (this.isRefreshing) {
-      this.log(`Skipped overlapping refresh for ${reason}.`);
+      this.pendingRefreshReason = reason;
+      this.log(`Queued refresh for ${reason} (a scan is already running).`);
       return;
     }
 
     this.isRefreshing = true;
+    this.pendingRefreshReason = undefined;
+
     try {
       const settings = this.getSettings();
       this.emitStatus({
@@ -113,6 +123,7 @@ class CssIndex {
       });
       this.entriesByClass.clear();
       this.entriesByFile.clear();
+      this.sortedClassesCache = null;
 
       if (!files.length) {
         this.log("No global CSS sources selected. Use the status bar button or the command palette to choose CSS files or folders.");
@@ -150,6 +161,11 @@ class CssIndex {
       throw error;
     } finally {
       this.isRefreshing = false;
+      if (this.pendingRefreshReason) {
+        const queuedReason = this.pendingRefreshReason;
+        this.pendingRefreshReason = undefined;
+        await this.refreshAll(queuedReason);
+      }
     }
   }
 
@@ -197,13 +213,18 @@ class CssIndex {
     for (const pattern of watchPatterns) {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       watcher.onDidCreate((uri) => {
-        this.indexFile(uri).catch((error) => this.logError("create", uri, error));
+        this.indexFile(uri)
+          .then(() => this.onStyleFileChanged(uri))
+          .catch((error) => this.logError("create", uri, error));
       });
       watcher.onDidChange((uri) => {
-        this.indexFile(uri).catch((error) => this.logError("change", uri, error));
+        this.indexFile(uri)
+          .then(() => this.onStyleFileChanged(uri))
+          .catch((error) => this.logError("change", uri, error));
       });
       watcher.onDidDelete((uri) => {
         this.removeFile(uri);
+        this.onStyleFileChanged(uri);
       });
       this.watchers.push(watcher);
     }
@@ -278,6 +299,7 @@ class CssIndex {
 
     const key = uri.toString();
     this.entriesByFile.set(key, nextEntries);
+    this.sortedClassesCache = null;
 
     for (const entry of nextEntries) {
       if (!this.entriesByClass.has(entry.className)) {
@@ -293,6 +315,8 @@ class CssIndex {
     if (!existing) {
       return;
     }
+
+    this.sortedClassesCache = null;
 
     for (const entry of existing) {
       const bucket = this.entriesByClass.get(entry.className);

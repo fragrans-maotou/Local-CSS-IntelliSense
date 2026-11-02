@@ -3,6 +3,8 @@
 README.dev.md
 CHANGELOG.md
 scripts/**
+test/**
+docs/**
 .tmp-dynamic-parse-test*/**
 .vsix-build/**
 .packaging-temp/**

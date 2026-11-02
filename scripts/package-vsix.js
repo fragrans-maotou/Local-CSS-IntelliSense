@@ -22,7 +22,7 @@ try {
   if (fs.existsSync(outputVsix)) {
     fs.unlinkSync(outputVsix);
   }
-  compressArchive(path.join(extractDir, "*"), bundleZip);
+  compressArchive(extractDir, bundleZip);
   fs.copyFileSync(bundleZip, outputVsix);
   console.log(`Created ${path.basename(outputVsix)}`);
 } finally {
@@ -96,15 +96,31 @@ function copyPathRecursively(sourcePath, targetPath) {
 
 function expandArchive(zipPath, destinationPath) {
   fs.mkdirSync(destinationPath, { recursive: true });
-  runPowerShell(
-    `Expand-Archive -LiteralPath '${escapePowerShell(zipPath)}' -DestinationPath '${escapePowerShell(destinationPath)}' -Force`
-  );
+  if (process.platform === "win32") {
+    runPowerShell(
+      `Expand-Archive -LiteralPath '${escapePowerShell(zipPath)}' -DestinationPath '${escapePowerShell(destinationPath)}' -Force`
+    );
+    return;
+  }
+
+  execFileSync("unzip", ["-o", "-q", zipPath, "-d", destinationPath], {
+    cwd: workspaceRoot,
+    stdio: "inherit"
+  });
 }
 
-function compressArchive(sourceGlob, destinationZipPath) {
-  runPowerShell(
-    `Compress-Archive -Path '${escapePowerShell(sourceGlob)}' -DestinationPath '${escapePowerShell(destinationZipPath)}' -Force`
-  );
+function compressArchive(sourceDirectory, destinationZipPath) {
+  if (process.platform === "win32") {
+    runPowerShell(
+      `Compress-Archive -Path '${escapePowerShell(path.join(sourceDirectory, "*"))}' -DestinationPath '${escapePowerShell(destinationZipPath)}' -Force`
+    );
+    return;
+  }
+
+  execFileSync("zip", ["-r", "-q", destinationZipPath, "."], {
+    cwd: sourceDirectory,
+    stdio: "inherit"
+  });
 }
 
 function removeDirectory(targetPath) {

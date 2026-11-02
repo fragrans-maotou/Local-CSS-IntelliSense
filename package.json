@@ -2,7 +2,7 @@
   "name": "local-css-intellisense",
   "displayName": "Local CSS IntelliSense",
   "description": "Local CSS IntelliSense for workspace styles: completion, hover, and definition.",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "publisher": "local-css-intellisense",
   "icon": "media/icon.png",
   "license": "MIT",
@@ -178,8 +178,8 @@
   },
   "scripts": {
     "package": "node scripts/package-vsix.js",
-    "lint": "node -e \"console.log('No linter configured')\"",
-    "test": "node -e \"console.log('No automated tests configured yet')\""
+    "lint": "node --check src/extension.js && node --check src/css-index.js && node --check src/parsing.js && node --check src/document-context.js && node --check src/document-style-resolver.js && node --check src/path-utils.js && node --check src/presentation.js && node --check src/selector-relevance.js && node --check src/source-selection.js && node --check src/utils.js && node --check src/constants.js",
+    "test": "node test/run-tests.js"
   },
   "devDependencies": {
     "@vscode/vsce": "^2.31.1"
@@ -191,6 +191,7 @@
     "postcss-safe-parser": "^7.0.1",
     "postcss-scss": "^4.0.9",
     "postcss-selector-parser": "^7.1.0",
-    "sass": "^1.99.0"
+    "sass": "^1.99.0",
+    "source-map-js": "^1.2.1"
   }
 }

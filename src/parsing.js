@@ -66,13 +66,32 @@ async function extractInlineStyleContext(document) {
 
 function extractStyleDependencies(source) {
   const dependencies = [];
-  const importRegex = /@import\s+(?:url\(\s*)?["']([^"')]+(?:\.css|\.scss|\.less))["']\s*\)?/gi;
-  const useRegex = /@(use|forward)\s+["']([^"']+(?:\.css|\.scss|\.less))["']/gi;
+  // Allow extensionless @import / @use / @forward specs (common in Sass), then let path resolution add extensions / partials.
+  const importRegex = /@import\s+(?:url\(\s*)?["']([^"')]+)["']\s*\)?/gi;
+  const useRegex = /@(use|forward)\s+["']([^"']+)["']/gi;
 
   collectRegexMatches(importRegex, source, dependencies, 1);
   collectRegexMatches(useRegex, source, dependencies, 2);
 
-  return Array.from(new Set(dependencies));
+  return Array.from(new Set(dependencies.filter(isResolvableStyleDependency)));
+}
+
+function isResolvableStyleDependency(spec) {
+  if (!spec) {
+    return false;
+  }
+
+  const normalized = spec.trim();
+  if (!normalized) {
+    return false;
+  }
+
+  // Skip Sass built-ins, package protocol imports, and remote URLs.
+  if (/^(sass|pkg|http|https|data):/i.test(normalized) || /^(https?:)?\/\//i.test(normalized)) {
+    return false;
+  }
+
+  return true;
 }
 
 function collectRegexMatches(regex, source, target, captureIndex = 1) {

@@ -98,6 +98,9 @@ npm install
 ## Command
 
 - `Local CSS IntelliSense: Refresh Index`
+- `Local CSS IntelliSense: Select CSS Sources`
+- `Local CSS IntelliSense: Clear CSS Sources`
+- `Local CSS IntelliSense: Manage CSS Sources`
 
 ## Architecture
 

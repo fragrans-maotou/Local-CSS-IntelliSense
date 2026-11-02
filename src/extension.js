@@ -13,13 +13,16 @@ function activate(context) {
   const outputChannel = vscode.window.createOutputChannel("Local CSS IntelliSense");
   const sourceStore = createSourceSelectionStore(context);
   const statusBar = createSourceStatusBar(sourceStore);
+  const styleResolver = new DocumentStyleResolver(outputChannel);
   const cssIndex = new CssIndex(outputChannel, {
     getSelectedSources: () => sourceStore.getPaths(),
     onStatusChange: (status) => {
       statusBar.setScanStatus(status);
+    },
+    onStyleFileChanged: (uri) => {
+      styleResolver.invalidateStyle(uri);
     }
   });
-  const styleResolver = new DocumentStyleResolver(outputChannel);
   const suggestController = createSuggestController();
   const warmupController = createWarmupController(styleResolver);
 
@@ -49,11 +52,17 @@ function activate(context) {
 
         const tokenInfo = getCurrentClassToken(document, position, classContext);
         const prefix = tokenInfo.text.toLowerCase();
-        const documentContext = styleResolver.getCachedContext(document) || EMPTY_CONTEXT;
-        if (documentContext === EMPTY_CONTEXT) {
-          warmupController.schedule(document);
+        let documentContext = styleResolver.getCachedContext(document);
+        if (!documentContext) {
+          try {
+            documentContext = await styleResolver.getContext(document);
+          } catch (error) {
+            warmupController.schedule(document);
+            documentContext = EMPTY_CONTEXT;
+          }
         }
-        const localClasses = Array.from(documentContext.entriesByClass.keys()).sort((left, right) => left.localeCompare(right));
+
+        const localClasses = Array.from(documentContext.entriesByClass.keys());
         const globalClasses = cssIndex.getClasses();
         const seen = new Set();
         const items = [];
@@ -64,84 +73,50 @@ function activate(context) {
           }
           seen.add(className);
 
-          if (prefix && !className.toLowerCase().includes(prefix)) {
+          const lowerName = className.toLowerCase();
+          if (prefix && !lowerName.includes(prefix)) {
             continue;
           }
 
+          const startsWithPrefix = !prefix || lowerName.startsWith(prefix);
           const entries = sortEntriesByPriority(
             mergeEntries(documentContext.entriesByClass.get(className) || [], cssIndex.getEntries(className))
           );
-          items.push(createCompletionItem(className, entries, tokenInfo.range, documentContext.entriesByClass.has(className)));
+          items.push(
+            createCompletionItem(className, entries, tokenInfo.range, documentContext.entriesByClass.has(className), startsWithPrefix)
+          );
         }
 
+        items.sort((left, right) => String(left.sortText).localeCompare(String(right.sortText)));
         return items.slice(0, 200);
       }
     },
     " ",
     "\"",
     "'",
-    "-"
+    "-",
+    "_"
   );
 
   const hoverProvider = vscode.languages.registerHoverProvider(SUPPORTED_DOCUMENTS, {
     async provideHover(document, position) {
-      const className = getClassNameAtPosition(document, position);
-      if (!className) {
+      const lookup = await resolveClassLookup(document, position, styleResolver, cssIndex, warmupController);
+      if (!lookup || (!lookup.localEntries.length && !lookup.globalEntries.length)) {
         return undefined;
       }
-      const currentClassNames = getCurrentElementClassNames(document, position);
 
-      let documentContext = styleResolver.getCachedContext(document);
-      if (!documentContext) {
-        warmupController.schedule(document);
-      }
-
-      let localEntries = sortEntriesByPriority((documentContext || EMPTY_CONTEXT).entriesByClass.get(className) || []);
-      let globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
-      if (!localEntries.length && !globalEntries.length) {
-        documentContext = await styleResolver.getContext(document);
-        localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
-        if (!localEntries.length) {
-          return undefined;
-        }
-        globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
-      }
-
-      const relevantEntries = filterEntriesForElement(className, [...localEntries, ...globalEntries], currentClassNames);
-      localEntries = relevantEntries.filter((entry) => (entry.sourceKind || "global") !== "global");
-      globalEntries = relevantEntries.filter((entry) => (entry.sourceKind || "global") === "global");
-
-      return new vscode.Hover(buildContextualHoverMarkdown(localEntries, globalEntries, cssIndex.getHoverLimit()));
+      return new vscode.Hover(buildContextualHoverMarkdown(lookup.localEntries, lookup.globalEntries, cssIndex.getHoverLimit()));
     }
   });
 
   const definitionProvider = vscode.languages.registerDefinitionProvider(SUPPORTED_DOCUMENTS, {
     async provideDefinition(document, position) {
-      const className = getClassNameAtPosition(document, position);
-      if (!className) {
+      const lookup = await resolveClassLookup(document, position, styleResolver, cssIndex, warmupController);
+      if (!lookup || !lookup.entries.length) {
         return undefined;
       }
-      const currentClassNames = getCurrentElementClassNames(document, position);
 
-      let documentContext = styleResolver.getCachedContext(document);
-      if (!documentContext) {
-        warmupController.schedule(document);
-      }
-
-      let localEntries = sortEntriesByPriority((documentContext || EMPTY_CONTEXT).entriesByClass.get(className) || []);
-      let globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
-      let entries = filterEntriesForElement(className, sortEntriesByPriority([...localEntries, ...globalEntries]), currentClassNames);
-      if (!entries.length) {
-        documentContext = await styleResolver.getContext(document);
-        localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
-        if (!localEntries.length) {
-          return undefined;
-        }
-        globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
-        entries = filterEntriesForElement(className, sortEntriesByPriority([...localEntries, ...globalEntries]), currentClassNames);
-      }
-
-      return entries.map((entry) => {
+      return lookup.entries.map((entry) => {
         const targetUri = vscode.Uri.file(entry.filePath);
         const targetPosition = new vscode.Position(Math.max(0, entry.line - 1), Math.max(0, entry.column - 1));
         return new vscode.Location(targetUri, targetPosition);
@@ -261,11 +236,40 @@ function activate(context) {
     openListener,
     closeListener,
     saveListener,
-    activeEditorListener,
+    activeEditorListener
   );
 }
 
 function deactivate() {}
+
+async function resolveClassLookup(document, position, styleResolver, cssIndex, warmupController) {
+  const className = getClassNameAtPosition(document, position);
+  if (!className) {
+    return undefined;
+  }
+
+  const currentClassNames = getCurrentElementClassNames(document, position);
+  let documentContext = styleResolver.getCachedContext(document);
+  if (!documentContext) {
+    try {
+      documentContext = await styleResolver.getContext(document);
+    } catch (error) {
+      warmupController.schedule(document);
+      documentContext = EMPTY_CONTEXT;
+    }
+  }
+
+  const localEntries = sortEntriesByPriority(documentContext.entriesByClass.get(className) || []);
+  const globalEntries = sortEntriesByPriority(removeDuplicateEntries(cssIndex.getEntries(className), localEntries));
+  const relevantEntries = filterEntriesForElement(className, [...localEntries, ...globalEntries], currentClassNames);
+
+  return {
+    className,
+    localEntries: relevantEntries.filter((entry) => (entry.sourceKind || "global") !== "global"),
+    globalEntries: relevantEntries.filter((entry) => (entry.sourceKind || "global") === "global"),
+    entries: relevantEntries
+  };
+}
 
 function createSuggestController() {
   let timer = undefined;

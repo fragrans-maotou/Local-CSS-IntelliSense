@@ -30,7 +30,10 @@ function createSourceSelectionStore(context) {
         return undefined;
       }
 
-      const normalized = uniqueItems(workspaceUris.map((uri) => workspaceRelativePath(uri)));
+      const normalized = uniqueItems([
+        ...readStoredPaths(context),
+        ...workspaceUris.map((uri) => workspaceRelativePath(uri))
+      ]);
       await context.workspaceState.update(STORAGE_KEY, normalized);
       return normalized;
     },

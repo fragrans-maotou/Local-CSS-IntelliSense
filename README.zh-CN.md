@@ -96,6 +96,9 @@ npm install
 ## 命令
 
 - `Local CSS IntelliSense: Refresh Index`
+- `Local CSS IntelliSense: Select CSS Sources`
+- `Local CSS IntelliSense: Clear CSS Sources`
+- `Local CSS IntelliSense: Manage CSS Sources`
 
 ## 设计文档
 

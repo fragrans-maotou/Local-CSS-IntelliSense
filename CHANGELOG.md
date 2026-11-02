@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.16
+
+- 修复 hover / Go to Definition 在「全局索引已有结果」时不再等待当前文档样式上下文，从而漏掉当前文件 / 引入样式的问题 / Fix hover and Go to Definition skipping the current-document style context whenever global matches already exist, which previously omitted inline and imported rules.
+- 修复索引全量刷新重叠时直接丢弃后续刷新请求的问题，改为排队重跑 / Queue overlapping full-index refresh requests instead of silently dropping them.
+- 样式文件 watcher 变更时同步失效文档样式缓存，避免引入样式 hover 结果过期 / Invalidate document style caches when watched style files change so imported-style hover results stay fresh.
+- 补全优先按「当前文档相关 + 前缀 startsWith」排序，并缓存全局类名排序结果 / Rank completions by contextual match and prefix startsWith, and cache the sorted global class list.
+- Sass 依赖解析支持无后缀 `@use` / `@import` 以及 `_partial` 文件；显式声明 `source-map-js` 依赖 / Resolve extensionless Sass `@use` / `@import` specs and `_partial` files; declare `source-map-js` explicitly.
+- 手动选择扫描源改为与已有选择合并，而不是覆盖 / Merge newly selected scan sources with existing ones instead of overwriting them.
+- 打包脚本在 Linux / macOS 上改用 `unzip` / `zip`，并增加可在 Node 下运行的基础单元测试 / Make the packaging script use `unzip` / `zip` on Linux and macOS, and add Node-based unit tests.
+
+
 ## 0.0.15
 
 - 调整样式去重签名，避免同一条规则因为 source map 列号差异而在 hover 中重复显示两次 / Adjust the style-entry dedupe signature so the same rule is not shown twice in hover when source-map column offsets differ.

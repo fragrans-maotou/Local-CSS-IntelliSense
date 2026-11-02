@@ -16,21 +16,21 @@
 
 现在 `src` 目录按职责拆成了几层：
 
-- [extension.js](/E:/myself/localhost-css/src/extension.js)
+- [extension.js](../src/extension.js)
   入口文件，只负责注册 VS Code provider、命令、监听器。
-- [constants.js](/E:/myself/localhost-css/src/constants.js)
+- [constants.js](../src/constants.js)
   放插件常量，比如支持的文档类型、默认索引范围、默认排除项。
-- [css-index.js](/E:/myself/localhost-css/src/css-index.js)
+- [css-index.js](../src/css-index.js)
   负责“全局样式索引”。它会扫描工作区，把符合规则的 css/scss/less 解析进内存。
-- [document-style-resolver.js](/E:/myself/localhost-css/src/document-style-resolver.js)
+- [document-style-resolver.js](../src/document-style-resolver.js)
   负责“当前文档相关样式”。它会找当前文件里的 `<style>`、当前文件直接引入的样式文件，以及这些样式文件继续依赖的样式。
-- [document-context.js](/E:/myself/localhost-css/src/document-context.js)
+- [document-context.js](../src/document-context.js)
   负责判断光标是不是落在 class 值里，以及当前 class token 是什么。
-- [parsing.js](/E:/myself/localhost-css/src/parsing.js)
+- [parsing.js](../src/parsing.js)
   负责把样式文本解析成结构化 entry。
-- [presentation.js](/E:/myself/localhost-css/src/presentation.js)
+- [presentation.js](../src/presentation.js)
   负责把 entry 转成 hover 展示和补全展示。
-- [utils.js](/E:/myself/localhost-css/src/utils.js)
+- [utils.js](../src/utils.js)
   放去重、排序、聚合、glob 小工具。
 
 这样拆开后，后续你想加功能时，通常都能很快知道应该改哪里。
@@ -178,11 +178,11 @@ flowchart LR
 
 如果你要加新能力，可以按这个判断：
 
-- 和“文件怎么找”有关：改 [css-index.js](/E:/myself/localhost-css/src/css-index.js) 或 [path-utils.js](/E:/myself/localhost-css/src/path-utils.js)
-- 和“样式怎么解析”有关：改 [parsing.js](/E:/myself/localhost-css/src/parsing.js)
-- 和“光标位置怎么识别”有关：改 [document-context.js](/E:/myself/localhost-css/src/document-context.js)
-- 和“UI 怎么展示”有关：改 [presentation.js](/E:/myself/localhost-css/src/presentation.js)
-- 和“当前文件关联样式怎么找”有关：改 [document-style-resolver.js](/E:/myself/localhost-css/src/document-style-resolver.js)
+- 和“文件怎么找”有关：改 [css-index.js](../src/css-index.js) 或 [path-utils.js](../src/path-utils.js)
+- 和“样式怎么解析”有关：改 [parsing.js](../src/parsing.js)
+- 和“光标位置怎么识别”有关：改 [document-context.js](../src/document-context.js)
+- 和“UI 怎么展示”有关：改 [presentation.js](../src/presentation.js)
+- 和“当前文件关联样式怎么找”有关：改 [document-style-resolver.js](../src/document-style-resolver.js)
 
 ## 9. 你可以把这个插件理解成什么
 

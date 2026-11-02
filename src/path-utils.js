@@ -131,10 +131,19 @@ function buildStyleResolutionCandidates(baseCandidates) {
     allCandidates.push(candidate);
 
     const extension = path.extname(candidate.fsPath).toLowerCase();
+    const directory = path.dirname(candidate.fsPath);
+    const baseName = path.basename(candidate.fsPath, extension);
+
     if (!extension) {
       for (const candidateExtension of SUPPORTED_STYLE_EXTENSIONS) {
         allCandidates.push(vscode.Uri.file(`${candidate.fsPath}${candidateExtension}`));
+        // Sass/Less partials are commonly written as _name.scss without the underscore in imports.
+        if (!baseName.startsWith("_")) {
+          allCandidates.push(vscode.Uri.file(path.join(directory, `_${baseName}${candidateExtension}`)));
+        }
       }
+    } else if (SUPPORTED_STYLE_EXTENSIONS.has(extension) && !baseName.startsWith("_")) {
+      allCandidates.push(vscode.Uri.file(path.join(directory, `_${baseName}${extension}`)));
     }
   }
 

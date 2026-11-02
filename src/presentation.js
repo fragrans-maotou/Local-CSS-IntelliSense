@@ -19,7 +19,7 @@ function buildContextualHoverMarkdown(localEntries, globalEntries, limit, compac
   return markdown;
 }
 
-function createCompletionItem(className, entries, range, isContextual) {
+function createCompletionItem(className, entries, range, isContextual, startsWithPrefix = true) {
   const item = new vscode.CompletionItem(className, vscode.CompletionItemKind.Class);
   const primary = entries[0];
   const localEntries = entries.filter((entry) => (entry.sourceKind || "global") !== "global");
@@ -27,7 +27,8 @@ function createCompletionItem(className, entries, range, isContextual) {
   item.range = range;
   item.insertText = className;
   item.filterText = className;
-  item.sortText = `${isContextual ? "0" : "1"}-${className}`;
+  // Prefer contextual matches, then prefix startsWith, then alphabetical.
+  item.sortText = `${isContextual ? "0" : "1"}-${startsWithPrefix ? "0" : "1"}-${className}`;
   item.detail = primary ? createEntrySummary(primary) : "Local CSS class";
   item.description = primary ? path.basename(primary.filePath) : "Local CSS";
   item.documentation = buildContextualHoverMarkdown(localEntries.slice(0, 2), globalEntries.slice(0, 1), 3, true);
